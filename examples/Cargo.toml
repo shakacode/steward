@@ -1,0 +1,21 @@
+[package]
+name = "steward-example"
+version = "0.0.0"
+authors = ["Alex Fedoseev <alex@fedoseev.mx>"]
+license = "MIT"
+edition = "2018"
+
+[[bin]]
+name = "steward-example-cli"
+path = "./cli/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+steward = { path = "../" }
+lazy_static = "1.4.0"
+dotenv = "0.15.0"
+
+[workspace]
+members = [
+  "server"
+]

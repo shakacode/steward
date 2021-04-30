@@ -1,0 +1,10 @@
+[package]
+name = "server"
+version = "0.0.0"
+authors = ["Alex Fedoseev <alex@fedoseev.mx>"]
+license = "MIT"
+edition = "2018"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+hyper = { version = "0.14.7", features = ["full"] }
