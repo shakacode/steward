@@ -61,7 +61,7 @@ mod server {
         cmd! {
             exe: "cargo build --package=server",
             env: Config::to_env(),
-            pwd: Loc::client(),
+            pwd: Loc::root(),
             msg: "Building Rust server",
         }
     }
