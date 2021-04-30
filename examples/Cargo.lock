@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "steward"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "console",
  "lazy_static",
