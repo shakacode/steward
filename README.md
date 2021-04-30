@@ -6,6 +6,8 @@
 
 Task runner and process manager for Rust.
 
+![steward](./examples/output.png)
+
 If you're not happy managing your infrastructure with a pile of bash scripts, this crate might be helpful. It provides base building blocks for defining and running various kinds of tasks. It's like [`foreman`](https://github.com/ddollar/foreman) but more low-level, with Rust API and more flexibility & features.
 
 Works great with [`clap`](https://github.com/clap-rs/clap)!
