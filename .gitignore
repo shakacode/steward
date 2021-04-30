@@ -1,0 +1,8 @@
+target/
+
+# examples
+examples/**/node_modules/
+examples/**/lib/
+examples/**/.merlin
+examples/**/.bsb.lock
+examples/**/*.bs.js
