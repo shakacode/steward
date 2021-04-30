@@ -261,6 +261,7 @@ dependencies = [
  "rand",
  "thiserror",
  "tokio",
+ "winapi",
 ]
 
 [[package]]

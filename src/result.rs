@@ -23,12 +23,23 @@ pub enum Error {
     },
     /// When a process manager failed to kill hanged child process, there is a zombie process left hanging around.
     /// This error provides details, such as process id and an error, so user could handle cleaning manually.
+    #[cfg(unix)]
     #[error("Process with pid {pid} hanged and we were unable to kill it. Error: {err}", pid = .pid, err = .err)]
     Zombie {
         /// Process id of the hanged process.
         pid: u32,
         /// Error raised on attempt to terminate the hanged process.
         err: KillError,
+    },
+    /// When a process manager failed to kill hanged child process, there is a zombie process left hanging around.
+    /// This error provides details, such as process id and an error, so user could handle cleaning manually.
+    #[cfg(windows)]
+    #[error("Process with pid {pid} hanged and we were unable to kill it. Error: {err}", pid = .pid, err = .err)]
+    Zombie {
+        /// Process id of the hanged process.
+        pid: u32,
+        /// Error raised on attempt to terminate the hanged process.
+        err: winapi::shared::minwindef::DWORD,
     },
 }
 
