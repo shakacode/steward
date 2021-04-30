@@ -231,7 +231,7 @@ impl RunningProcess {
     }
 
     #[cfg(unix)]
-    pub fn kill(pid: u32) -> nix::Result<()> {
+    pub fn kill(pid: u32) -> Result<()> {
         use nix::{
             sys::signal::{self, Signal},
             unistd::Pid,
@@ -239,6 +239,7 @@ impl RunningProcess {
 
         let pid = Pid::from_raw(pid as i32);
         signal::kill(pid, Signal::SIGKILL)
+            .map_err(|err| Error::Zombie { pid, err })
     }
 
     #[cfg(windows)]
