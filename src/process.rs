@@ -246,13 +246,13 @@ impl RunningProcess {
         use winapi::{
             shared::{
                 minwindef::{BOOL, DWORD, FALSE, UINT},
-                ntdef::NULL
+                ntdef::NULL,
             },
             um::{
-                handleapi::CloseHandle,
                 errhandlingapi::GetLastError,
+                handleapi::CloseHandle,
                 processthreadsapi::{OpenProcess, TerminateProcess},
-                winnt::{PROCESS_TERMINATE, HANDLE},
+                winnt::{HANDLE, PROCESS_TERMINATE},
             },
         };
 
@@ -273,10 +273,7 @@ impl RunningProcess {
             // https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror
             let err: DWORD = GetLastError();
 
-            Err(Error::Zombie {
-                pid,
-                err,
-            })
+            Err(Error::Zombie { pid, err })
         }
 
         unsafe {
