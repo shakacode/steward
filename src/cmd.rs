@@ -120,7 +120,7 @@ where
 ///
 /// ## Examples
 /// General command:
-/// ```rust
+/// ```ignore
 /// cmd! {
 ///   exe: "rm -rf target",
 ///   env: Env::empty(),
@@ -130,7 +130,7 @@ where
 /// ```
 ///
 /// Dynamically constructed command:
-/// ```rust
+/// ```ignore
 /// cmd! {
 ///   exe: format!("rm -rf {}", dir),
 ///   env: Env::empty(),
@@ -140,7 +140,7 @@ where
 /// ```
 ///
 /// Command without a message:
-/// ```rust
+/// ```ignore
 /// cmd! {
 ///   exe: "ls",
 ///   env: Env::empty(),

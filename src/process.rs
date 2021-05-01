@@ -94,7 +94,7 @@ where
 ///
 /// ## Examples
 /// Constructing a process with the default [`TIMEOUT`](struct@TIMEOUT):
-/// ```rust
+/// ```ignore
 /// process! {
 ///   tag: "server",
 ///   cmd: cmd! { ... },
@@ -102,7 +102,7 @@ where
 /// ```
 ///
 /// Constructing a process with the specific timeout:
-/// ```rust
+/// ```ignore
 /// use std::time::Duration;
 ///
 /// process! {
@@ -237,8 +237,7 @@ impl RunningProcess {
             unistd::Pid,
         };
 
-        let pid = Pid::from_raw(pid as i32);
-        signal::kill(pid, Signal::SIGKILL)
+        signal::kill(Pid::from_raw(pid as i32), Signal::SIGKILL)
             .map_err(|err| Error::Zombie { pid, err })
     }
 
@@ -247,13 +246,13 @@ impl RunningProcess {
         use winapi::{
             shared::{
                 minwindef::{BOOL, DWORD, FALSE, UINT},
-                ntdef::NULL
+                ntdef::NULL,
             },
             um::{
-                handleapi::CloseHandle,
                 errhandlingapi::GetLastError,
+                handleapi::CloseHandle,
                 processthreadsapi::{OpenProcess, TerminateProcess},
-                winnt::{PROCESS_TERMINATE, HANDLE},
+                winnt::{HANDLE, PROCESS_TERMINATE},
             },
         };
 
@@ -274,10 +273,7 @@ impl RunningProcess {
             // https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror
             let err: DWORD = GetLastError();
 
-            Err(Error::Zombie {
-                pid,
-                err,
-            })
+            Err(Error::Zombie { pid, err })
         }
 
         unsafe {
@@ -306,7 +302,7 @@ impl RunningProcess {
 
 /// Struct to run a pool of long riunning processes.
 ///
-/// ```rust
+/// ```ignore
 /// ProcessPool::run(vec![ process_1, process_2 ]).await
 /// ```
 pub struct ProcessPool;

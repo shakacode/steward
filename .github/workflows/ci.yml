@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  check:
+    name: Check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macOS-latest, windows-latest]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install toolchain
+        id: toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: 1.51.0
+          override: true
+          components: rustfmt, clippy
+
+      - name: Cache lib dependencies
+        uses: actions/cache@v1.0.1
+        with:
+          path: target
+          key: pr-build-lib-${{ steps.toolchain.outputs.rustc_hash }}-${{ hashFiles('./Cargo.lock') }}
+
+      - name: Cache examples dependencies
+        uses: actions/cache@v1.0.1
+        with:
+          path: examples/target
+          key: pr-build-examples-${{ steps.toolchain.outputs.rustc_hash }}-${{ hashFiles('./examples/Cargo.lock') }}
+
+      - name: Run cargo check against lib
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+
+      - name: Run cargo check against examples
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --manifest-path examples/Cargo.toml
+
+      - name: Run cargo test against lib
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+
+      - name: Run cargo test against examples
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --manifest-path examples/Cargo.toml
+
+      - name: Run cargo fmt against lib
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - name: Run cargo fmt against examples
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all --manifest-path examples/Cargo.toml -- --check
+
+      - name: Run cargo clippy against lib
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings
+
+      - name: Run cargo clippy against examples
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --manifest-path examples/Cargo.toml -- -D warnings

@@ -14,11 +14,11 @@
 //!
 //! Check out runnable examples on GitHub: [`steward/examples`](https://github.com/alexfedoseev/steward/tree/master/examples).
 //!
-//! ```rust
+//! ```ignore
 //! #[macro_use]
 //! extern crate steward;
 //!
-//! use steward::{Cmd, Env, ProcesPool, Process};
+//! use steward::{Cmd, Env, ProcessPool, Process};
 //!
 //! #[tokio::main]
 //! async fn main() -> steward::Result<()> {
@@ -78,12 +78,6 @@
 //! ```
 //!
 //! ## Limitations
-//! ### Windows support
-//! It wouldn't compile on Windows yet. No fundamental problems, I'm just not a user of this OS
-//! and can't properly test the implementation. There is only one platform-specific place
-//! in the crate that is related to a process termination. If you're a Windows user
-//! and willing to help — PRs are totally welcome.
-//!
 //! ### Async runtimes
 //! Tokio only.
 
@@ -92,42 +86,46 @@ extern crate lazy_static;
 
 /// Base building block of the crate.
 ///
-/// ```rust
-/// let build_cmd = cmd! {
-///     exe: "cargo build",
-///     env: Env::empty(),
-///     pwd: Loc::root(),
-///     msg: "Building a server",
-/// };
+/// ```ignore
+/// async fn build() -> steward::Result<()> {
+///     let build_cmd = cmd! {
+///         exe: "cargo build",
+///         env: Env::empty(),
+///         pwd: Loc::root(),
+///         msg: "Building a server",
+///     };
 ///
-/// build_cmd.run().await
+///     build_cmd.run().await
+/// }
 /// ```
 #[macro_use]
 pub mod cmd;
 /// Long running process.
 ///
-/// ```rust
-///  let server_process = process! {
-///      tag: "server",
-///      cmd: cmd! {
-///          exe: "cargo watch",
-///          env: Env::empty(),
-///          pwd: Loc::root(),
-///          msg: "Running a reloadable server",
-///      },
-///  };
+/// ```ignore
+/// async fn run() -> steward::Result<()> {
+///     let server_process = process! {
+///         tag: "server",
+///         cmd: cmd! {
+///             exe: "cargo watch",
+///             env: Env::empty(),
+///             pwd: Loc::root(),
+///             msg: "Running a reloadable server",
+///         },
+///     };
 ///
-///  let client_process = process! {
-///      tag: "client",
-///      cmd: cmd! {
-///          exe: "rescript build -w",
-///          env: Env::empty(),
-///          pwd: Loc::root(),
-///          msg: "Watching a client",
-///      },
-///  };
+///     let client_process = process! {
+///         tag: "client",
+///         cmd: cmd! {
+///             exe: "rescript build -w",
+///             env: Env::empty(),
+///             pwd: Loc::root(),
+///             msg: "Watching a client",
+///         },
+///     };
 ///
-/// ProcessPool::run(vec![server_process, client_process]).await
+///     ProcessPool::run(vec![server_process, client_process]).await
+/// }
 /// ```
 #[macro_use]
 pub mod process;

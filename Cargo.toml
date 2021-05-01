@@ -11,6 +11,7 @@ license = "MIT"
 edition = "2018"
 keywords = ["command", "process", "env"]
 exclude = ["examples/*"]
+autoexamples = false
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "fs", "net", "time", "process", "signal", "io-util", "macros"] }
