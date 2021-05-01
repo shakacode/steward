@@ -78,12 +78,6 @@
 //! ```
 //!
 //! ## Limitations
-//! ### Windows support
-//! It wouldn't compile on Windows yet. No fundamental problems, I'm just not a user of this OS
-//! and can't properly test the implementation. There is only one platform-specific place
-//! in the crate that is related to a process termination. If you're a Windows user
-//! and willing to help — PRs are totally welcome.
-//!
 //! ### Async runtimes
 //! Tokio only.
 
