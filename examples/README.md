@@ -1,8 +1,8 @@
 # Examples
 
-To run:
+To run the examples:
 
 ```sh
 cd examples
-cargo run cli
+cargo run
 ```
