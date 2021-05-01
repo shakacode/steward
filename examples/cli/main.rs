@@ -18,7 +18,7 @@ async fn main() -> steward::Result<()> {
     client::build().run().await?;
     server::build().run().await?;
     ProcessPool::run(vec![client::watch(), server::watch()]).await?;
-    Ok(1)
+    Ok(())
 }
 
 mod client {
