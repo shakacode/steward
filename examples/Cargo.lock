@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "steward"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "console",
  "lazy_static",
@@ -461,6 +461,7 @@ dependencies = [
  "rand",
  "thiserror",
  "tokio",
+ "winapi",
 ]
 
 [[package]]
