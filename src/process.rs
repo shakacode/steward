@@ -456,6 +456,7 @@ impl ProcessPool {
         }
 
         signal::ctrl_c().await.unwrap();
+        eprintln!(""); // Prints `^C` in terminal on its own line
 
         let expire = Instant::now() + timeout;
         while exited_processes.load(Ordering::Relaxed) < pool_size {
