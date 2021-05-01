@@ -237,8 +237,7 @@ impl RunningProcess {
             unistd::Pid,
         };
 
-        let pid = Pid::from_raw(pid as i32);
-        signal::kill(pid, Signal::SIGKILL)
+        signal::kill(Pid::from_raw(pid as i32), Signal::SIGKILL)
             .map_err(|err| Error::Zombie { pid, err })
     }
 
