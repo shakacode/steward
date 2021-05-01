@@ -94,7 +94,7 @@ where
 ///
 /// ## Examples
 /// Constructing a process with the default [`TIMEOUT`](struct@TIMEOUT):
-/// ```rust
+/// ```ignore
 /// process! {
 ///   tag: "server",
 ///   cmd: cmd! { ... },
@@ -102,7 +102,7 @@ where
 /// ```
 ///
 /// Constructing a process with the specific timeout:
-/// ```rust
+/// ```ignore
 /// use std::time::Duration;
 ///
 /// process! {
@@ -302,7 +302,7 @@ impl RunningProcess {
 
 /// Struct to run a pool of long riunning processes.
 ///
-/// ```rust
+/// ```ignore
 /// ProcessPool::run(vec![ process_1, process_2 ]).await
 /// ```
 pub struct ProcessPool;

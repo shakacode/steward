@@ -36,11 +36,10 @@ jobs:
         with:
           command: check
 
-      # TODO: Fix tests (docs)
-      # - name: Run cargo test
-      #   uses: actions-rs/cargo@v1
-      #   with:
-      #     command: test
+      - name: Run cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
 
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1
