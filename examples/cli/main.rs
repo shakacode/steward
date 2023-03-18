@@ -6,7 +6,7 @@ extern crate lazy_static;
 mod config;
 mod loc;
 
-use clap::Clap;
+use clap::Parser;
 
 use config::Config;
 use loc::Loc;
@@ -17,14 +17,14 @@ pub type Cmd = steward::Cmd<Loc>;
 pub type Process = steward::Process<Loc>;
 pub type ProcessPool = steward::ProcessPool;
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(
     name = "steward-demo",
     version = "1.0",
     author = "Alex Fedoseev <alex@fedoseev.mx>"
 )]
 pub struct Cli {
-    #[clap(long, about = "Runs a process pool with dependent porcesses")]
+    #[arg(long, help = "Run a process pool with dependent porcesses")]
     with_deps: bool,
 }
 
