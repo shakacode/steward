@@ -129,6 +129,35 @@ pub mod cmd;
 /// ```
 #[macro_use]
 pub mod process;
+/// Dependant processes.
+///
+/// Useful when you need to spawn a number of long-running processes,
+/// and some of them depend on something else to start properly,
+/// such as an HTTP service being available or a file existing.
+///
+/// ```ignore
+///  async fn run() -> steward::Result<()> {
+///      server::build().run().await?;
+///      client::build().run().await?;
+///
+///      ProcessPool::run_with_deps(vec![
+///          PoolEntry::Process(server::watch()),
+///          PoolEntry::ProcessWithDep {
+///              process: client::watch(),
+///              dependency: Box::new(HttpDep {
+///                  tag: "server".to_string(),
+///                  host: Config::SERVER_HOST().to_owned(),
+///                  port: Config::SERVER_PORT().to_owned(),
+///                  path: "/".to_string(),
+///                  timeout: Some(Duration::from_secs(30)),
+///                  ..Default::default()
+///              }),
+///          },
+///      ])
+///      .await
+/// }
+/// ```
+pub mod dep;
 /// Command environment.
 pub mod env;
 /// [`Result`](Result) and [`Error`](Error) types of this crate.
@@ -139,9 +168,10 @@ mod fmt;
 mod loc;
 
 pub use cmd::Cmd;
+pub use dep::{Dependency, FsDep, HttpDep, HttpMethod, TcpDep};
 pub use env::Env;
 pub use loc::Location;
-pub use process::{Process, ProcessPool};
+pub use process::{PoolEntry, Process, ProcessPool};
 pub use result::{Error, Result};
 
 pub(crate) use process::{ExitResult, RunningProcess};

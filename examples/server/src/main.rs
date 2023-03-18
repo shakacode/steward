@@ -1,7 +1,10 @@
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, time::Duration};
 
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
+use hyper::{
+    service::{make_service_fn, service_fn},
+    Body, Request, Response, Server,
+};
+use tokio::time;
 
 async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     Ok(Response::new(req.into_body()))
@@ -9,6 +12,9 @@ async fn echo(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Delaying a start to be able to demo dependent processes
+    time::sleep(Duration::from_secs(5)).await;
+
     let addr = format!(
         "{host}:{port}",
         host = env::var("SERVER_HOST").unwrap(),

@@ -47,7 +47,7 @@ impl Output {
 
 impl<Loc> Cmd<Loc>
 where
-    Loc: Location + Send + Sync,
+    Loc: Location,
 {
     /// Command to run.
     pub fn exe(&self) -> &str {

@@ -15,7 +15,7 @@ use tokio::{
     signal, task, time,
 };
 
-use crate::{Cmd, Error, Location, Result};
+use crate::{Cmd, Dependency, Error, Location, Result};
 
 lazy_static! {
     /// Default timeout (in seconds) that is used when a [`Process`](Process) is cretaed via [`process!`](process!) macro without providing a specific timeout.
@@ -39,7 +39,7 @@ lazy_static! {
     };
 }
 
-/// Long running process. Can be constructed via [`Process::new`](Process::new) or convenience [`process!`](process!) macro.
+/// Long running process. Can be constructed via [`Process::new`](Process::new) or convenience [`process!`](crate::process!) macro.
 pub struct Process<Loc> {
     /// Tag used as an identificator in output when process runs as a part of a [`ProcessPool`](ProcessPool).
     pub tag: &'static str,
@@ -67,7 +67,7 @@ pub(crate) enum ExitResult {
 
 impl<Loc> Process<Loc>
 where
-    Loc: Location + Send + Sync,
+    Loc: Location,
 {
     /// Constructs a new process.
     pub fn new(tag: &'static str, cmd: Cmd<Loc>, timeout: Duration) -> Self {
@@ -149,7 +149,7 @@ impl RunningProcess {
         timeout: Duration,
     ) -> io::Result<Self>
     where
-        Loc: Location + Send + Sync,
+        Loc: Location,
     {
         let process = Command::new(Cmd::<Loc>::SHELL)
             .args(Cmd::<Loc>::shelled(&cmd.exe))
@@ -300,59 +300,111 @@ impl RunningProcess {
     }
 }
 
-/// Struct to run a pool of long riunning processes.
+/// Entry of a [`ProcessPool`](ProcessPool) when some of the processes depend on something.
+/// It is used as an input to the [`ProcessPool::run_with_deps`](ProcessPool::run_with_deps) method.
+/// See [`dep`](crate::dep) module documentation.
+pub enum PoolEntry<Loc, Dep: ?Sized> {
+    /// An indipendent long-running process.
+    Process(Process<Loc>),
+    /// A long-running process that depends on some other thing.
+    ProcessWithDep {
+        /// The process.
+        process: Process<Loc>,
+        /// The dependency. See [`Dependency`](Dependency).
+        dependency: Box<Dep>,
+    },
+}
+
+impl<Loc> PoolEntry<Loc, dyn Dependency>
+where
+    Loc: Location + 'static,
+{
+    fn process(&self) -> &Process<Loc> {
+        match self {
+            Self::Process(process) => process,
+            Self::ProcessWithDep {
+                process,
+                dependency: _,
+            } => process,
+        }
+    }
+}
+
+/// Struct to run a pool of long-running processes.
 ///
 /// ```ignore
-/// ProcessPool::run(vec![ process_1, process_2 ]).await
+/// ProcessPool::run(vec![process_1, process_2]).await
 /// ```
 pub struct ProcessPool;
 
 impl ProcessPool {
-    /// Runs a pool of long riunning processes.
+    /// Runs a pool of long-running processes.
     pub async fn run<Loc>(pool: Vec<Process<Loc>>) -> Result<()>
     where
-        Loc: Location + Send + Sync + 'static,
+        Loc: Location + 'static,
+    {
+        let pool = pool.into_iter().map(|p| PoolEntry::Process(p)).collect();
+        ProcessPool::runner::<Loc>(pool).await
+    }
+
+    /// Runs a pool of long-running processes, some of which depend on something,
+    /// such as an HTTP service being available or a file existing.
+    /// See [`dep`](crate::dep) module documentation.
+    pub async fn run_with_deps<Loc>(pool: Vec<PoolEntry<Loc, dyn Dependency>>) -> Result<()>
+    where
+        Loc: Location + 'static,
+    {
+        ProcessPool::runner(pool).await
+    }
+
+    async fn runner<Loc>(pool: Vec<PoolEntry<Loc, dyn Dependency>>) -> Result<()>
+    where
+        Loc: Location + 'static,
     {
         let pool_size = pool.len();
         let exited_processes = Arc::new(AtomicUsize::new(0));
 
-        let tag_col_length = pool.iter().fold(0, |acc, process| {
-            let len = process.tag().len();
-            if len > acc {
-                len
-            } else {
-                acc
-            }
-        });
-
-        let timeout = pool.iter().fold(Duration::from_secs(0), |x, p| {
-            if p.timeout > x {
-                p.timeout
-            } else {
-                x
-            }
-        });
+        let (tag_col_length, timeout) =
+            pool.iter()
+                .fold((0, Duration::default()), |(len, timeout), entry| {
+                    let process = entry.process();
+                    let len = {
+                        let tag_len = process.tag().len();
+                        if tag_len > len {
+                            tag_len
+                        } else {
+                            len
+                        }
+                    };
+                    let timeout = if process.timeout > timeout {
+                        process.timeout
+                    } else {
+                        timeout
+                    };
+                    (len, timeout)
+                });
 
         let colors = colors::make(pool_size as u8);
-        let processes: Vec<(Process<Loc>, Color)> = pool.into_iter().zip(colors).collect();
+        let processes: Vec<(PoolEntry<Loc, dyn Dependency>, Color)> =
+            pool.into_iter().zip(colors).collect();
 
-        let processes_list = processes
-            .iter()
-            .fold(String::new(), |acc, (process, color)| {
-                let styled = console::style(process.tag().to_string()).fg(*color).bold();
-                if acc == "" {
-                    styled.to_string()
-                } else {
-                    format!("{}, {}", acc, styled)
-                }
-            });
+        let processes_list = processes.iter().fold(String::new(), |acc, (entry, color)| {
+            let process = entry.process();
+            let styled = console::style(process.tag().to_string()).fg(*color).bold();
+            if acc.is_empty() {
+                styled.to_string()
+            } else {
+                format!("{}, {}", acc, styled)
+            }
+        });
 
         eprintln!("❯ {} {}", console::style("Running:").bold(), processes_list);
 
-        for (process, color) in processes {
+        for (entry, color) in processes {
             let exited_processes = exited_processes.clone();
 
             task::spawn(async move {
+                let process = entry.process();
                 let tag = process.tag();
                 let cmd = process.cmd();
                 let timeout = process.timeout();
@@ -372,83 +424,116 @@ impl ProcessPool {
                     ))
                 };
 
-                eprintln!(
-                    "{tag} {headline}",
-                    tag = colored_tag_col,
-                    headline = crate::headline!(cmd),
-                );
+                let dep_res = match entry {
+                    PoolEntry::Process(_) => Ok(()),
+                    PoolEntry::ProcessWithDep {
+                        process: _,
+                        ref dependency,
+                    } => {
+                        let dep_tag = console::style(dependency.tag()).bold();
 
-                let mut process: RunningProcess =
-                    RunningProcess::spawn(cmd, Stdio::piped(), Stdio::piped(), timeout)
-                        .await
-                        .expect(&format!("Failed to spawn {} process", colored_tag))
-                        .into();
+                        eprintln!(
+                            "{col} {process} is waiting for its {dep} dependency...",
+                            col = colored_tag_col,
+                            dep = dep_tag,
+                            process = colored_tag
+                        );
 
-                match process.stdout() {
-                    None => eprintln!(
-                        "{} Unable to read from {} stdout",
-                        colored_tag_col, colored_tag
-                    ),
-                    Some(stdout) => {
-                        let mut reader = BufReader::new(stdout).lines();
-                        task::spawn({
-                            let tag = colored_tag_col.clone();
-                            async move {
-                                while let Some(line) = reader.next_line().await.unwrap() {
-                                    eprintln!("{} {}", tag, line);
-                                }
-                            }
-                        });
+                        let res = dependency.wait().await;
+                        if let Err(error) = &res {
+                            eprintln!(
+                                "{col} ❗️ {dep} dependency of {process} errored: {error}\nNot executing {process}.",
+                                col = colored_tag_col,
+                                dep = dep_tag,
+                                process = colored_tag,
+                                error = error
+                            );
+                        }
+                        res
                     }
-                }
+                };
 
-                match process.stderr() {
-                    None => eprintln!(
-                        "{} Unable to read from {} stderr",
-                        colored_tag_col, colored_tag
-                    ),
-                    Some(stderr) => {
-                        let mut reader = BufReader::new(stderr).lines();
-                        task::spawn({
-                            let tag = colored_tag_col.clone();
-                            async move {
-                                while let Some(line) = reader.next_line().await.unwrap() {
-                                    eprintln!("{} {}", tag, line);
+                if let Ok(()) = dep_res {
+                    eprintln!(
+                        "{tag} {headline}",
+                        tag = colored_tag_col,
+                        headline = crate::headline!(cmd),
+                    );
+
+                    let mut process: RunningProcess =
+                        RunningProcess::spawn(cmd, Stdio::piped(), Stdio::piped(), timeout)
+                            .await
+                            .unwrap_or_else(|err| {
+                                panic!("Failed to spawn {} process. {}", colored_tag, err)
+                            });
+
+                    match process.stdout() {
+                        None => eprintln!(
+                            "{} Unable to read from {} stdout",
+                            colored_tag_col, colored_tag
+                        ),
+                        Some(stdout) => {
+                            let mut reader = BufReader::new(stdout).lines();
+                            task::spawn({
+                                let tag = colored_tag_col.clone();
+                                async move {
+                                    while let Some(line) = reader.next_line().await.unwrap() {
+                                        eprintln!("{} {}", tag, line);
+                                    }
                                 }
-                            }
-                        });
+                            });
+                        }
                     }
-                }
 
-                let res = process.wait().await;
+                    match process.stderr() {
+                        None => eprintln!(
+                            "{} Unable to read from {} stderr",
+                            colored_tag_col, colored_tag
+                        ),
+                        Some(stderr) => {
+                            let mut reader = BufReader::new(stderr).lines();
+                            task::spawn({
+                                let tag = colored_tag_col.clone();
+                                async move {
+                                    while let Some(line) = reader.next_line().await.unwrap() {
+                                        eprintln!("{} {}", tag, line);
+                                    }
+                                }
+                            });
+                        }
+                    }
 
-                match res {
-                    Ok(ExitResult::Output(_)) => eprintln!(
-                        "{} Process {} exited with code 0.",
-                        colored_tag_col, colored_tag
-                    ),
-                     Ok(ExitResult::Interrupted) => eprintln!(
-                        "{} Process {} successfully exited.",
-                        colored_tag_col, colored_tag
-                    ),
-                    Ok(ExitResult::Killed { pid }) => eprintln!(
-                        "{} Process {} with pid {} was killed due to timeout.",
-                        colored_tag_col,
-                        colored_tag,
-                        pid = pid,
-                    ),
-                    Err(Error::NonZeroExitCode { code, output: _ }) => eprintln!(
-                        "{} Process {} exited with non-zero code: {:#?}",
-                        colored_tag_col, colored_tag, code
-                    ),
-                    Err(Error::Zombie { pid, err }) => eprintln!(
-                        "{} ⚠️  Process {} with pid {} hanged and we were unable to kill it. Error: {}",
-                        colored_tag_col, colored_tag, pid, err
-                    ),
-                    Err(Error::IoError(err)) => eprintln!(
-                        "{} Process {} exited with error: {}",
-                        colored_tag_col, colored_tag, err
-                    ),
+                    let res = process.wait().await;
+
+                    match res {
+                        Ok(ExitResult::Output(_)) => eprintln!(
+                            "{} Process {} exited with code 0.",
+                            colored_tag_col, colored_tag
+                        ),
+                         Ok(ExitResult::Interrupted) => eprintln!(
+                            "{} Process {} successfully exited.",
+                            colored_tag_col, colored_tag
+                        ),
+                        Ok(ExitResult::Killed { pid }) => eprintln!(
+                            "{} Process {} with pid {pid} was killed due to timeout.",
+                            colored_tag_col,
+                            colored_tag,
+                        ),
+                        Err(Error::NonZeroExitCode { code, output: _ }) => eprintln!(
+                            "{} Process {} exited with non-zero code: {}",
+                            colored_tag_col,
+                            colored_tag,
+                            code.map(|x| format!("{}", x)).unwrap_or_else(|| "-".to_string())
+                        ),
+                        Err(Error::Zombie { pid, err }) => eprintln!(
+                            "{} ⚠️  Process {} with pid {} hanged and we were unable to kill it. Error: {}",
+                            colored_tag_col, colored_tag, pid, err
+                        ),
+                        Err(Error::IoError(err)) => eprintln!(
+                            "{} Process {} exited with error: {}",
+                            colored_tag_col, colored_tag, err
+                        ),
+                    }
                 }
 
                 exited_processes.fetch_add(1, Ordering::Relaxed);
@@ -456,7 +541,7 @@ impl ProcessPool {
         }
 
         signal::ctrl_c().await.unwrap();
-        eprintln!(""); // Prints `^C` in terminal on its own line
+        eprintln!(); // Prints `^C` in terminal on its own line
 
         let expire = Instant::now() + timeout;
         while exited_processes.load(Ordering::Relaxed) < pool_size {
@@ -520,7 +605,7 @@ mod tests {
     use crate::{Cmd, Location, Process};
 
     #[allow(dead_code)]
-    fn process_macro_with_timeout<Loc: Location + Send + Sync>(cmd: Cmd<Loc>) -> Process<Loc> {
+    fn process_macro_with_timeout<Loc: Location>(cmd: Cmd<Loc>) -> Process<Loc> {
         process! {
           tag: "server",
           cmd: cmd,
@@ -529,7 +614,7 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn process_macro_without_timeout<Loc: Location + Send + Sync>(cmd: Cmd<Loc>) -> Process<Loc> {
+    fn process_macro_without_timeout<Loc: Location>(cmd: Cmd<Loc>) -> Process<Loc> {
         process! {
           tag: "server",
           cmd: cmd,

@@ -1,5 +1,8 @@
 # Changelog
 
+### UNRELEASED
+- Add dependant processes. See [docs](https://docs.rs/steward/latest/steward/dep/index.html).
+
 ### 0.0.3
 - Improve process pool output.
 

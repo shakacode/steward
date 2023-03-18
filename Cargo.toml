@@ -13,12 +13,18 @@ keywords = ["command", "process", "env"]
 exclude = ["examples/*"]
 autoexamples = false
 
+[features]
+default = ["tls"]
+
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "fs", "net", "time", "process", "signal", "io-util", "macros"] }
 console = "0.14.1"
 thiserror = "1.0"
 rand = "0.8.3"
 lazy_static = "1.4.0"
+async-trait = "0.1.50"
+hyper = { version = "0.14.5", features = ["client", "tcp", "http1"] }
+tls = { package = "hyper-tls", version = "0.5.0", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = "0.20.0"
