@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 /// Formats a headline that gets printed to console when running a command.
 ///
 /// ```sh
@@ -12,4 +14,8 @@ macro_rules! headline {
             None => format!("❯ {}", cmd),
         }
     }};
+}
+
+pub(crate) fn plain_headline(msg: impl Display) -> String {
+    format!("❯ {}", console::style(msg).bold())
 }

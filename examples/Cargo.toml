@@ -1,17 +1,19 @@
 [package]
-name = "steward-example"
+name = "steward-demo"
 version = "0.0.0"
 authors = ["Alex Fedoseev <alex@fedoseev.mx>"]
 license = "MIT"
-edition = "2018"
+edition = "2021"
 
 [[bin]]
-name = "steward-example-cli"
+name = "steward-demo"
 path = "./cli/main.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 steward = { path = "../" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+clap = { version = "4.1.8", features = ["derive"] }
 lazy_static = "1.4.0"
 dotenv = "0.15.0"
 

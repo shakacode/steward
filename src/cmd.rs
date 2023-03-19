@@ -1,9 +1,14 @@
 use std::{
+    io,
+    ops::Deref,
     process::{self, Stdio},
     time::Duration,
 };
 
-use crate::{process::TIMEOUT, Env, ExitResult, Location, Result, RunningProcess};
+use once_cell::sync::Lazy;
+use tokio::process::Command;
+
+use crate::{Env, ExitResult, Location, Result, RunningProcess};
 
 /// Struct holds a specification of a command. Can be used for running one-off commands, long running processes etc.
 #[derive(Clone)]
@@ -16,6 +21,109 @@ pub struct Cmd<Loc> {
     pub pwd: Loc,
     /// Message displayed when running a command.
     pub msg: Option<String>,
+}
+
+impl<Loc> Cmd<Loc>
+where
+    Loc: Location,
+{
+    /// Command to run.
+    pub fn exe(&self) -> &str {
+        &self.exe
+    }
+
+    /// Environment of a process.
+    pub fn env(&self) -> &Env {
+        &self.env
+    }
+
+    /// Working directory of a process.
+    pub fn pwd(&self) -> &Loc {
+        &self.pwd
+    }
+
+    /// Message displayed when running a command.
+    pub fn msg(&self) -> Option<&String> {
+        self.msg.as_ref()
+    }
+}
+
+/// Amount of time to wait before killing hanged process.
+///
+/// When constructing a new [`Process`](crate::Process) via [`process!`](crate::process!) macro
+/// without providing a specific timeout, the [`KillTimeout::default`](KillTimeout::default) implementation is used.
+/// By default, the timeout is 10 seconds, but it can be configured by setting `PROCESS_TIMEOUT` environment variable.
+#[derive(Clone, Debug)]
+pub struct KillTimeout(Duration);
+
+impl KillTimeout {
+    /// Constructs a new timeout.
+    pub fn new(duration: Duration) -> Self {
+        Self(duration)
+    }
+
+    /// Returns underlying [`Duration`](std::time::Duration).
+    pub fn duration(&self) -> Duration {
+        self.0
+    }
+}
+
+static DEFAULT_KILL_TIMEOUT: Lazy<Duration> = Lazy::new(|| {
+    let default = Duration::from_secs(10);
+    match std::env::var("PROCESS_TIMEOUT") {
+        Err(_) => default,
+        Ok(timeout) => match timeout.parse::<u64>() {
+            Ok(x) => Duration::from_secs(x),
+            Err(_) => {
+                eprintln!(
+                    "⚠️  TIMEOUT variable is not a valid int: {}. Using default: {}",
+                    timeout,
+                    default.as_secs()
+                );
+                default
+            }
+        },
+    }
+});
+
+impl Default for KillTimeout {
+    fn default() -> Self {
+        Self(*DEFAULT_KILL_TIMEOUT)
+    }
+}
+
+impl Deref for KillTimeout {
+    type Target = Duration;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Duration> for KillTimeout {
+    fn from(value: Duration) -> Self {
+        Self(value)
+    }
+}
+
+/// Options for [`Cmd::spawn`](Cmd::spawn).
+pub struct SpawnOptions {
+    /// Stdout stream.
+    pub stdout: Stdio,
+    /// Stderr stream.
+    pub stderr: Stdio,
+    /// Amount of time to wait before killing hanged process. See [`KillTimeout`](crate::KillTimeout).
+    pub timeout: KillTimeout,
+}
+
+impl Default for SpawnOptions {
+    fn default() -> Self {
+        Self {
+            stdout: Stdio::inherit(),
+            stderr: Stdio::inherit(),
+            timeout: KillTimeout::default(),
+        }
+    }
 }
 
 /// Enum returned from [`Cmd::output`](Cmd::output).
@@ -47,58 +155,8 @@ impl Output {
 
 impl<Loc> Cmd<Loc>
 where
-    Loc: Location + Send + Sync,
+    Loc: Location,
 {
-    /// Command to run.
-    pub fn exe(&self) -> &str {
-        &self.exe
-    }
-
-    /// Environment of a process.
-    pub fn env(&self) -> &Env {
-        &self.env
-    }
-
-    /// Working directory of a process.
-    pub fn pwd(&self) -> &Loc {
-        &self.pwd
-    }
-
-    /// Message displayed when running a command.
-    pub fn msg(&self) -> Option<&String> {
-        self.msg.as_ref()
-    }
-
-    /// Runs one-off command with inherited [`Stdio`](std::process::Stdio). Prints headline (witn [`Cmd::msg`](Cmd::msg), if provided) to stderr.
-    pub async fn run(&self) -> Result<()> {
-        eprintln!("{}", crate::headline!(self));
-        self.spawn(Stdio::inherit(), Stdio::inherit()).await?;
-        Ok(())
-    }
-
-    /// Runs one-off command. Doesn't print anything.
-    pub async fn silent(&self) -> Result<()> {
-        self.spawn(Stdio::null(), Stdio::null()).await?;
-        Ok(())
-    }
-
-    /// Runs one-off command and returns [`Output`](Output). Doesn't print anything.
-    pub async fn output(&self) -> Result<Output> {
-        let res = self.spawn(Stdio::piped(), Stdio::piped()).await?;
-        match res {
-            ExitResult::Output(output) => Ok(Output::Data(output.stdout)),
-            ExitResult::Interrupted | ExitResult::Killed { pid: _ } => Ok(Output::Interrupted),
-        }
-    }
-
-    async fn spawn(&self, stdout: Stdio, stderr: Stdio) -> Result<ExitResult> {
-        let cmd = self;
-        RunningProcess::spawn(cmd, stdout, stderr, Duration::from_secs(*TIMEOUT))
-            .await?
-            .wait()
-            .await
-    }
-
     #[cfg(unix)]
     pub(crate) const SHELL: &'static str = "/bin/sh";
 
@@ -113,6 +171,71 @@ where
     #[cfg(windows)]
     pub(crate) fn shelled(cmd: &str) -> Vec<&str> {
         vec!["/c", cmd]
+    }
+
+    /// Runs one-off command with inherited [`Stdio`](std::process::Stdio). Prints headline (witn [`Cmd::msg`](Cmd::msg), if provided) to stderr.
+    pub async fn run(&self) -> Result<()> {
+        eprintln!("{}", crate::headline!(self));
+
+        let opts = SpawnOptions {
+            stdout: Stdio::inherit(),
+            stderr: Stdio::inherit(),
+            ..Default::default()
+        };
+
+        self.spawn(opts)?.wait().await?;
+
+        Ok(())
+    }
+
+    /// Runs one-off command. Doesn't print anything.
+    pub async fn silent(&self) -> Result<()> {
+        let opts = SpawnOptions {
+            stdout: Stdio::null(),
+            stderr: Stdio::null(),
+            ..Default::default()
+        };
+
+        self.spawn(opts)?.wait().await?;
+
+        Ok(())
+    }
+
+    /// Runs one-off command and returns [`Output`](Output). Doesn't print anything.
+    pub async fn output(&self) -> Result<Output> {
+        let opts = SpawnOptions {
+            stdout: Stdio::piped(),
+            stderr: Stdio::piped(),
+            ..Default::default()
+        };
+
+        let res = self.spawn(opts)?.wait().await?;
+
+        match res {
+            ExitResult::Output(output) => Ok(Output::Data(output.stdout)),
+            ExitResult::Interrupted | ExitResult::Killed { pid: _ } => Ok(Output::Interrupted),
+        }
+    }
+
+    /// A low-level method for spawning a process and getting a handle to it.
+    pub fn spawn(&self, opts: SpawnOptions) -> io::Result<RunningProcess> {
+        let cmd = self;
+
+        let SpawnOptions {
+            stdout,
+            stderr,
+            timeout,
+        } = opts;
+
+        let process = Command::new(Cmd::<Loc>::SHELL)
+            .args(Cmd::<Loc>::shelled(&cmd.exe))
+            .envs(cmd.env.to_owned())
+            .current_dir(cmd.pwd.as_path())
+            .stdout(stdout)
+            .stderr(stderr)
+            .spawn()?;
+
+        Ok(RunningProcess { process, timeout })
     }
 }
 

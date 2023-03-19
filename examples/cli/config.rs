@@ -28,17 +28,17 @@ impl Config {
     }
 }
 
-impl<'a> Config {
-    #[allow(non_snake_case, dead_code)]
-    pub fn SERVER_HOST() -> &'a str {
+impl Config {
+    #[allow(non_snake_case)]
+    pub fn SERVER_HOST() -> &'static str {
         CONFIG
             .data
             .get("SERVER_HOST")
             .expect("SERVER_HOST is not set")
     }
 
-    #[allow(non_snake_case, dead_code)]
-    pub fn SERVER_PORT(&self) -> &str {
+    #[allow(non_snake_case)]
+    pub fn SERVER_PORT() -> &'static str {
         CONFIG
             .data
             .get("SERVER_PORT")

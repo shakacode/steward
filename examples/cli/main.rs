@@ -6,18 +6,64 @@ extern crate lazy_static;
 mod config;
 mod loc;
 
+use clap::Parser;
+
 use config::Config;
 use loc::Loc;
+
+use steward::{HttpMethod, HttpService, PoolEntry};
 
 pub type Cmd = steward::Cmd<Loc>;
 pub type Process = steward::Process<Loc>;
 pub type ProcessPool = steward::ProcessPool;
 
+#[derive(Parser)]
+#[clap(
+    name = "steward-demo",
+    version = "1.0",
+    author = "Alex Fedoseev <alex@fedoseev.mx>"
+)]
+pub struct Cli {
+    #[arg(long, help = "Run a process pool with dependent porcesses")]
+    with_deps: bool,
+}
+
 #[tokio::main]
 async fn main() -> steward::Result<()> {
-    client::build().run().await?;
-    server::build().run().await?;
-    ProcessPool::run(vec![client::watch(), server::watch()]).await?;
+    match Cli::parse() {
+        Cli { with_deps: false } => {
+            server::build().run().await?;
+            client::build().run().await?;
+
+            ProcessPool::run(vec![server::watch(), client::watch()]).await?;
+        }
+        Cli { with_deps: true } => {
+            use std::time::Duration;
+
+            server::build().run().await?;
+            client::build().run().await?;
+
+            ProcessPool::run_with_deps(vec![
+                PoolEntry::Process(server::watch()),
+                PoolEntry::ProcessWithDep {
+                    process: client::watch(),
+                    dependency: Box::new(HttpService {
+                        tag: "server".to_string(),
+                        addr: format!(
+                            "http://{host}:{port}",
+                            host = Config::SERVER_HOST(),
+                            port = Config::SERVER_PORT()
+                        )
+                        .parse()
+                        .unwrap(),
+                        method: HttpMethod::GET,
+                        timeout: Duration::from_secs(30),
+                    }),
+                },
+            ])
+            .await?;
+        }
+    }
     Ok(())
 }
 

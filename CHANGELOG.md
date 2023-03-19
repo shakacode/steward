@@ -1,5 +1,12 @@
 # Changelog
 
+### 0.0.4
+- Switch to 2021 Rust edition.
+- Add dependant processes. See [docs](https://docs.rs/steward/latest/steward/dep/index.html).
+- Add [`Cmd::spawn`](https://docs.rs/steward/latest/steward/cmd/struct.Cmd.html#method.spawn) and [`Process::spawn`](https://docs.rs/steward/latest/steward/process/struct.Process.html#method.spawn) methods.
+- Expose [`RunningProcess`](https://docs.rs/steward/latest/steward/process/struct.RunningProcess.html). Add [`RunningProcess::stop`](https://docs.rs/steward/latest/steward/process/struct.RunningProcess.html#method.stop) (`unix` only, for now).
+- Add [`run`](https://docs.rs/steward/latest/steward/fn.run.html), [`run_mut`](https://docs.rs/steward/latest/steward/fn.run_mut.html) and [`run_once`](https://docs.rs/steward/latest/steward/fn.run_once.html) functions.
+
 ### 0.0.3
 - Improve process pool output.
 
