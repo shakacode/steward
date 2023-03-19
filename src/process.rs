@@ -11,33 +11,11 @@ use std::{
 use console::Color;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{Child, ChildStderr, ChildStdout, Command},
+    process::{Child, ChildStderr, ChildStdout},
     signal, task, time,
 };
 
-use crate::{Cmd, Dependency, Error, Location, Result};
-
-lazy_static! {
-    /// Default timeout (in seconds) that is used when a [`Process`](Process) is cretaed via [`process!`](process!) macro without providing a specific timeout.
-
-    /// It can be configured by setting `PROCESS_TIMEOUT` environment variable.
-    pub static ref TIMEOUT: u64 = {
-        let default = 10;
-        match std::env::var("PROCESS_TIMEOUT") {
-            Err(_) => default,
-            Ok(timeout) => match timeout.parse::<u64>() {
-                Ok(x) => x,
-                Err(_) => {
-                    eprintln!(
-                        "⚠️  TIMEOUT variable is not a valid int: {}. Using default: {}",
-                        timeout, default
-                    );
-                    default
-                }
-            },
-        }
-    };
-}
+use crate::{Cmd, Dependency, Error, KillTimeout, Location, Result, SpawnOptions};
 
 /// Long running process. Can be constructed via [`Process::new`](Process::new) or convenience [`process!`](crate::process!) macro.
 pub struct Process<Loc> {
@@ -45,8 +23,8 @@ pub struct Process<Loc> {
     pub tag: &'static str,
     /// [Command](Cmd) to run a process.
     pub cmd: Cmd<Loc>,
-    /// Amount of time to wait before killing hanged process. See also [`TIMEOUT`](struct@TIMEOUT).
-    pub timeout: Duration,
+    /// Amount of time to wait before killing hanged process. See [`KillTimeout`](crate::KillTimeout).
+    pub timeout: KillTimeout,
 }
 
 enum TeardownReason {
@@ -70,7 +48,7 @@ where
     Loc: Location,
 {
     /// Constructs a new process.
-    pub fn new(tag: &'static str, cmd: Cmd<Loc>, timeout: Duration) -> Self {
+    pub fn new(tag: &'static str, cmd: Cmd<Loc>, timeout: KillTimeout) -> Self {
         Self { tag, cmd, timeout }
     }
 
@@ -85,15 +63,21 @@ where
     }
 
     /// Returns a timeout of a process.
-    pub fn timeout(&self) -> Duration {
-        self.timeout
+    pub fn timeout(&self) -> &KillTimeout {
+        &self.timeout
+    }
+
+    /// Spawns a process and returns a [`RunningProcess`](RunningProcess),
+    /// which includes a [`Child`](tokio::process::Child).
+    pub async fn spawn(&self, opts: SpawnOptions) -> io::Result<RunningProcess> {
+        self.cmd().spawn(opts)
     }
 }
 
 /// Convenience macro for creating a [`Process`](Process).
 ///
 /// ## Examples
-/// Constructing a process with the default [`TIMEOUT`](struct@TIMEOUT):
+/// Constructing a process with the default [`KillTimeout`](crate::KillTimeout):
 /// ```ignore
 /// process! {
 ///   tag: "server",
@@ -108,7 +92,7 @@ where
 /// process! {
 ///   tag: "server",
 ///   cmd: cmd! { ... },
-///   timeout: Duration::from_secs(20),
+///   timeout: Duration::from_secs(20).into(),
 /// }
 /// ```
 #[macro_export]
@@ -131,35 +115,26 @@ macro_rules! process {
         $crate::Process::new(
             $tag,
             $cmd,
-            std::time::Duration::from_secs(*$crate::process::TIMEOUT),
+            $crate::KillTimeout::default(),
         )
     };
 }
 
-pub(crate) struct RunningProcess {
-    process: Child,
-    timeout: Duration,
+/// Wrapper around a running child process.
+pub struct RunningProcess {
+    pub(crate) process: Child,
+    pub(crate) timeout: KillTimeout,
 }
 
 impl RunningProcess {
-    pub(crate) async fn spawn<Loc>(
-        cmd: &Cmd<Loc>,
-        stdout: Stdio,
-        stderr: Stdio,
-        timeout: Duration,
-    ) -> io::Result<Self>
-    where
-        Loc: Location,
-    {
-        let process = Command::new(Cmd::<Loc>::SHELL)
-            .args(Cmd::<Loc>::shelled(&cmd.exe))
-            .envs(cmd.env.to_owned())
-            .current_dir(cmd.pwd.as_path())
-            .stdout(stdout)
-            .stderr(stderr)
-            .spawn()?;
+    /// Returns a reference to the underlying [`Child`](tokio::process::Child) process.
+    pub fn as_child(&self) -> &Child {
+        &self.process
+    }
 
-        Ok(Self { process, timeout })
+    /// Consumes the instance and gives a handle to the underlying [`Child`](tokio::process::Child) process.
+    pub fn into_child(self) -> Child {
+        self.process
     }
 
     pub(crate) fn stdout(&mut self) -> Option<ChildStdout> {
@@ -172,7 +147,12 @@ impl RunningProcess {
 
     pub(crate) async fn wait(self) -> Result<ExitResult> {
         let process = self.process;
-        let pid = process.id().expect("wait is called on exited process"); // failing fast
+
+        let pid = match process.id() {
+            Some(pid) => pid,
+            None => return Err(Error::ProcessDoesNotExist),
+        };
+
         let process_exited = Arc::new(AtomicBool::new(false));
 
         let exit_reason = {
@@ -215,7 +195,7 @@ impl RunningProcess {
                     });
                     tokio::select! {
                         _ = exit_checker => CtrlCResult::ProcessExited,
-                        _ = time::sleep(self.timeout) => CtrlCResult::Timeout,
+                        _ = time::sleep(*self.timeout) => CtrlCResult::Timeout,
                     }
                 };
 
@@ -230,8 +210,49 @@ impl RunningProcess {
         }
     }
 
+    /// Tries to safely terminate a running process. If the termination didn't succeed, tries to kill it.
     #[cfg(unix)]
-    pub fn kill(pid: u32) -> Result<()> {
+    pub async fn stop(mut self) -> Result<()> {
+        use nix::{
+            sys::signal::{self, Signal},
+            unistd::Pid,
+        };
+
+        match self.process.id() {
+            None => Err(Error::ProcessDoesNotExist),
+            Some(pid) => match signal::kill(Pid::from_raw(pid as i32), Signal::SIGINT) {
+                Ok(()) => {
+                    let process = &mut self.process;
+
+                    let res = tokio::select! {
+                        res = process.wait() => Some(res),
+                        _ = time::sleep(*self.timeout) => None,
+                    };
+
+                    match res {
+                        Some(Ok(_)) => Ok(()),
+                        Some(Err(error)) => {
+                            eprintln!("⚠️ IO error on SIGINT: {error}. Killing the process {pid}.");
+                            Self::kill(pid)
+                        }
+                        None => {
+                            eprintln!("⚠️ SIGINT timeout. Killing the process {pid}.");
+                            Self::kill(pid)
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("⚠️ Failed to terminate the process {pid}. {error}. Killing it.");
+                    Self::kill(pid)
+                }
+            },
+        }
+    }
+
+    // TODO: Implemetn RunningProcess::stop for windows
+
+    #[cfg(unix)]
+    pub(crate) fn kill(pid: u32) -> Result<()> {
         use nix::{
             sys::signal::{self, Signal},
             unistd::Pid,
@@ -242,7 +263,7 @@ impl RunningProcess {
     }
 
     #[cfg(windows)]
-    pub fn kill(pid: u32) -> Result<()> {
+    pub(crate) fn kill(pid: u32) -> Result<()> {
         use winapi::{
             shared::{
                 minwindef::{BOOL, DWORD, FALSE, UINT},
@@ -328,6 +349,16 @@ where
             } => process,
         }
     }
+
+    fn take(self) -> (Process<Loc>, Option<Box<dyn Dependency>>) {
+        match self {
+            Self::Process(process) => (process, None),
+            Self::ProcessWithDep {
+                process,
+                dependency,
+            } => (process, Some(dependency)),
+        }
+    }
 }
 
 /// Struct to run a pool of long-running processes.
@@ -376,8 +407,8 @@ impl ProcessPool {
                             len
                         }
                     };
-                    let timeout = if process.timeout > timeout {
-                        process.timeout
+                    let timeout = if *process.timeout > timeout {
+                        *process.timeout
                     } else {
                         timeout
                     };
@@ -404,7 +435,7 @@ impl ProcessPool {
             let exited_processes = exited_processes.clone();
 
             task::spawn(async move {
-                let process = entry.process();
+                let (process, dependency) = entry.take();
                 let tag = process.tag();
                 let cmd = process.cmd();
                 let timeout = process.timeout();
@@ -424,12 +455,9 @@ impl ProcessPool {
                     ))
                 };
 
-                let dep_res = match entry {
-                    PoolEntry::Process(_) => Ok(()),
-                    PoolEntry::ProcessWithDep {
-                        process: _,
-                        ref dependency,
-                    } => {
+                let dep_res = match dependency {
+                    None => Ok(()),
+                    Some(dependency) => {
                         let dep_tag = console::style(dependency.tag()).bold();
 
                         eprintln!(
@@ -460,12 +488,15 @@ impl ProcessPool {
                         headline = crate::headline!(cmd),
                     );
 
-                    let mut process: RunningProcess =
-                        RunningProcess::spawn(cmd, Stdio::piped(), Stdio::piped(), timeout)
-                            .await
-                            .unwrap_or_else(|err| {
-                                panic!("Failed to spawn {} process. {}", colored_tag, err)
-                            });
+                    let opts = SpawnOptions {
+                        stdout: Stdio::piped(),
+                        stderr: Stdio::piped(),
+                        timeout: timeout.to_owned(),
+                    };
+
+                    let mut process = process.spawn(opts).await.unwrap_or_else(|err| {
+                        panic!("Failed to spawn {} process. {}", colored_tag, err)
+                    });
 
                     match process.stdout() {
                         None => eprintln!(
@@ -524,6 +555,10 @@ impl ProcessPool {
                             colored_tag_col,
                             colored_tag,
                             code.map(|x| format!("{}", x)).unwrap_or_else(|| "-".to_string())
+                        ),
+                        Err(Error::ProcessDoesNotExist) => eprintln!(
+                            "{} ⚠️  Process {} does not exist.",
+                            colored_tag_col, colored_tag
                         ),
                         Err(Error::Zombie { pid, err }) => eprintln!(
                             "{} ⚠️  Process {} with pid {} hanged and we were unable to kill it. Error: {}",
@@ -609,7 +644,7 @@ mod tests {
         process! {
           tag: "server",
           cmd: cmd,
-          timeout: Duration::from_secs(20),
+          timeout: Duration::from_secs(20).into(),
         }
     }
 

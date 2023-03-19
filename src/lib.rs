@@ -2,7 +2,7 @@
 
 //! Task runner and process manager for Rust.
 //!
-//! If you're not happy managing your infrastructure with a pile of bash scripts,
+//! If you're not happy managing your infrastructure with a pile of shell scripts,
 //! this crate might be helpful. It provides base building blocks for defining
 //! and running various kinds of tasks.
 //! It's like [`foreman`](https://github.com/ddollar/foreman) but more low-level, with Rust API
@@ -80,9 +80,6 @@
 //! ## Limitations
 //! ### Async runtimes
 //! Tokio only.
-
-#[macro_use]
-extern crate lazy_static;
 
 /// Base building block of the crate.
 ///
@@ -167,11 +164,11 @@ pub mod result;
 mod fmt;
 mod loc;
 
-pub use cmd::Cmd;
+pub use cmd::{Cmd, KillTimeout, SpawnOptions};
 pub use dep::{Dependency, FsDep, HttpDep, HttpMethod, TcpDep};
 pub use env::Env;
 pub use loc::Location;
-pub use process::{PoolEntry, Process, ProcessPool};
+pub use process::{PoolEntry, Process, ProcessPool, RunningProcess};
 pub use result::{Error, Result};
 
-pub(crate) use process::{ExitResult, RunningProcess};
+pub(crate) use process::ExitResult;

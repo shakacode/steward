@@ -7,6 +7,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[cfg(unix)]
 pub type KillError = nix::Error;
 
+#[cfg(windows)]
+pub type KillError = winapi::shared::minwindef::DWORD;
+
 /// Error type of this crate.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -21,6 +24,11 @@ pub enum Error {
         /// [`Output`](std::process::Output) of the exited process
         output: process::Output,
     },
+    /// Error raised when a child process does not return its identifier,
+    /// which means it does not exist at operating system level,
+    /// which is unexpected in the context of this program.
+    #[error("Process does not exist.")]
+    ProcessDoesNotExist,
     /// When a process manager failed to kill hanged child process, there is a zombie process left hanging around.
     /// This error provides details, such as process id and an error, so user could handle cleaning manually.
     #[cfg(unix)]
@@ -39,7 +47,7 @@ pub enum Error {
         /// Process id of the hanged process.
         pid: u32,
         /// Error raised on attempt to terminate the hanged process.
-        err: winapi::shared::minwindef::DWORD,
+        err: KillError,
     },
 }
 
