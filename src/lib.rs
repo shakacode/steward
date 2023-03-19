@@ -192,12 +192,14 @@ pub mod result;
 
 #[macro_use]
 mod fmt;
+mod fun;
 mod loc;
 
 pub use cmd::{Cmd, KillTimeout, SpawnOptions};
 pub use dep::{Dependency, DependencyWaitError};
 pub use env::Env;
 pub use fs::FsEntry;
+pub use fun::{run, run_mut, run_once};
 pub use loc::Location;
 pub use net::{HttpMethod, HttpService, TcpService};
 pub use process::{PoolEntry, Process, ProcessPool, RunningProcess};
