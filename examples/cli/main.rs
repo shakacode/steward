@@ -11,7 +11,7 @@ use clap::Parser;
 use config::Config;
 use loc::Loc;
 
-use steward::{HttpDep, PoolEntry};
+use steward::{HttpMethod, HttpService, PoolEntry};
 
 pub type Cmd = steward::Cmd<Loc>;
 pub type Process = steward::Process<Loc>;
@@ -47,13 +47,17 @@ async fn main() -> steward::Result<()> {
                 PoolEntry::Process(server::watch()),
                 PoolEntry::ProcessWithDep {
                     process: client::watch(),
-                    dependency: Box::new(HttpDep {
+                    dependency: Box::new(HttpService {
                         tag: "server".to_string(),
-                        host: Config::SERVER_HOST().to_owned(),
-                        port: Config::SERVER_PORT().to_owned(),
-                        path: "/".to_string(),
-                        timeout: Some(Duration::from_secs(30)),
-                        ..Default::default()
+                        addr: format!(
+                            "http://{host}:{port}",
+                            host = Config::SERVER_HOST(),
+                            port = Config::SERVER_PORT()
+                        )
+                        .parse()
+                        .unwrap(),
+                        method: HttpMethod::GET,
+                        timeout: Duration::from_secs(30),
                     }),
                 },
             ])

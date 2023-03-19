@@ -97,7 +97,7 @@
 /// ```
 #[macro_use]
 pub mod cmd;
-/// Long running process.
+/// Long running processes.
 ///
 /// ```ignore
 /// async fn run() -> steward::Result<()> {
@@ -128,7 +128,29 @@ pub mod cmd;
 pub mod process;
 /// Dependant processes.
 ///
-/// Useful when you need to spawn a number of long-running processes,
+/// Sometimes, a job or a service depends on something else to function properly. For example, to generate a GraphQL
+/// schema, a server must be available. Or to start a server, DB must be up and running. To handle
+/// such cases, there is a [`Dependency`](crate::Dependency) trait.
+///
+/// Types that implement this trait are able to check if a dependency is available or to wait until
+/// the dependency becomes available. For example, if some job requires a TCP service for some job:
+///
+/// ```ignore
+/// let service = TcpService::new(...);
+///
+/// service.wait().await.unwrap();
+///
+/// // here, the service is available...
+/// job.run().await;
+/// ```
+///
+/// You can use provided [`TcpService`](crate::TcpService), [`HttpService`](crate::HttpService),
+/// and [`FsEntry`](crate::FsEntry). Or implement your own
+/// (you would need [`async_trait`](https://docs.rs/async-trait/latest/async_trait/)).
+///
+/// ## Process pool
+///
+/// It is also useful when you need to spawn a pool of long-running processes,
 /// and some of them depend on something else to start properly,
 /// such as an HTTP service being available or a file existing.
 ///
@@ -141,13 +163,17 @@ pub mod process;
 ///          PoolEntry::Process(server::watch()),
 ///          PoolEntry::ProcessWithDep {
 ///              process: client::watch(),
-///              dependency: Box::new(HttpDep {
+///              dependency: Box::new(HttpService {
 ///                  tag: "server".to_string(),
-///                  host: Config::SERVER_HOST().to_owned(),
-///                  port: Config::SERVER_PORT().to_owned(),
-///                  path: "/".to_string(),
-///                  timeout: Some(Duration::from_secs(30)),
-///                  ..Default::default()
+///                  addr: format!(
+///                      "http://{host}:{port}",
+///                      host = Config::SERVER_HOST(),
+///                      port = Config::SERVER_PORT()
+///                  )
+///                  .parse()
+///                  .unwrap(),
+///                  method: HttpMethod::GET,
+///                  timeout: Duration::from_secs(30),
 ///              }),
 ///          },
 ///      ])
@@ -157,6 +183,10 @@ pub mod process;
 pub mod dep;
 /// Command environment.
 pub mod env;
+/// File system related types.
+pub mod fs;
+/// Network related types.
+pub mod net;
 /// [`Result`](Result) and [`Error`](Error) types of this crate.
 pub mod result;
 
@@ -165,9 +195,11 @@ mod fmt;
 mod loc;
 
 pub use cmd::{Cmd, KillTimeout, SpawnOptions};
-pub use dep::{Dependency, FsDep, HttpDep, HttpMethod, TcpDep};
+pub use dep::{Dependency, DependencyWaitError};
 pub use env::Env;
+pub use fs::FsEntry;
 pub use loc::Location;
+pub use net::{HttpMethod, HttpService, TcpService};
 pub use process::{PoolEntry, Process, ProcessPool, RunningProcess};
 pub use result::{Error, Result};
 

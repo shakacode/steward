@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-/// Contains a location of file or directory of a project.
+/// A location of file or directory of a project.
 ///
 /// It must be implemented by application since it is project specific.
 /// See [example implementation](https://github.com/alexfedoseev/steward/tree/master/examples/cli/loc.rs) in the repository.
