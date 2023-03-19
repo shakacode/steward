@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macOS-latest, windows-latest]
+        os: [ ubuntu-latest, macOS-latest, windows-latest ]
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -21,7 +21,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.51.0
+          toolchain: 1.66.0
           override: true
           components: rustfmt, clippy
 
