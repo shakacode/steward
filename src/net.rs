@@ -136,7 +136,7 @@ impl HttpService {
 
     #[cfg(not(feature = "tls"))]
     fn https_connector() -> HttpConnector {
-        panic!("Cannot use https_connector method without tls feature");
+        unreachable!("Cannot use https_connector method without tls feature");
     }
 }
 
