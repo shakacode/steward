@@ -1,5 +1,8 @@
 # Changelog
 
+### 0.0.5
+- Fix non-TLS build.
+
 ### 0.0.4
 - Switch to 2021 Rust edition.
 - Add dependant processes. See [docs](https://docs.rs/steward/latest/steward/dep/index.html).
