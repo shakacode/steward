@@ -133,6 +133,11 @@ impl HttpService {
     fn https_connector() -> tls::HttpsConnector<HttpConnector> {
         tls::HttpsConnector::new()
     }
+
+    #[cfg(not(feature = "tls"))]
+    fn https_connector() -> HttpConnector {
+        unreachable!("Cannot use https_connector method without tls feature");
+    }
 }
 
 #[derive(Debug)]
