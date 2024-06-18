@@ -1,5 +1,17 @@
 # Changelog
 
+### 0.0.6
+- Allow unlabeled command:
+
+```rust
+cmd! {
+    "cargo build",
+    env: Env::empty(),
+    pwd: Loc::root(),
+    msg: "Building a server",
+}
+```
+
 ### 0.0.5
 - Fix non-TLS build.
 

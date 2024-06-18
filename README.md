@@ -19,6 +19,9 @@ See [docs.rs/steward](https://docs.rs/steward).
 See [`examples`](./examples).
 
 ## Limitations
+### Windows
+Apparently, Windows build is broken on recent versions of Rust due to [`winapi`](https://github.com/retep998/winapi-rs) being unmaintained. We need to migrate to [`windows-rs`](https://github.com/microsoft/windows-rs), but I don't know anything about Windows, so help is very welcome!
+
 ### Async runtimes
 Tokio only.
 
