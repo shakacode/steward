@@ -245,7 +245,7 @@ where
 /// General command:
 /// ```ignore
 /// cmd! {
-///   exe: "rm -rf target",
+///   "rm -rf target",
 ///   env: Env::empty(),
 ///   pwd: Loc::root(),
 ///   msg: "Removing target dir",
@@ -255,7 +255,7 @@ where
 /// Dynamically constructed command:
 /// ```ignore
 /// cmd! {
-///   exe: format!("rm -rf {}", dir),
+///   format!("rm -rf {}", dir),
 ///   env: Env::empty(),
 ///   pwd: Loc::root(),
 ///   msg: format!("Removing {} dir", dir),
@@ -263,6 +263,15 @@ where
 /// ```
 ///
 /// Command without a message:
+/// ```ignore
+/// cmd! {
+///   "ls",
+///   env: Env::empty(),
+///   pwd: Loc::root(),
+/// }
+/// ```
+///
+/// You can label a command with `exe:` if you want to:
 /// ```ignore
 /// cmd! {
 ///   exe: "ls",
@@ -273,6 +282,19 @@ where
 #[macro_export]
 macro_rules! cmd {
     {
+        $exe:literal,
+        env: $env:expr,
+        pwd: $pwd:expr,
+        msg: $msg:literal$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe.to_string(),
+            env: $env,
+            pwd: $pwd,
+            msg: Some($msg.to_string()),
+        }
+    };
+    {
         exe: $exe:literal,
         env: $env:expr,
         pwd: $pwd:expr,
@@ -283,6 +305,19 @@ macro_rules! cmd {
             env: $env,
             pwd: $pwd,
             msg: Some($msg.to_string()),
+        }
+    };
+    {
+        $exe:literal,
+        env: $env:expr,
+        pwd: $pwd:expr,
+        msg: Some($msg:expr)$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe.to_string(),
+            env: $env,
+            pwd: $pwd,
+            msg: Some($msg),
         }
     };
     {
@@ -299,7 +334,7 @@ macro_rules! cmd {
         }
     };
     {
-        exe: $exe:literal,
+        $exe:literal,
         env: $env:expr,
         pwd: $pwd:expr,
         msg: None$(,)?
@@ -315,6 +350,19 @@ macro_rules! cmd {
         exe: $exe:literal,
         env: $env:expr,
         pwd: $pwd:expr,
+        msg: None$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe.to_string(),
+            env: $env,
+            pwd: $pwd,
+            msg: None,
+        }
+    };
+    {
+        $exe:literal,
+        env: $env:expr,
+        pwd: $pwd:expr,
         msg: $msg:expr$(,)?
     } => {
         $crate::Cmd {
@@ -322,6 +370,32 @@ macro_rules! cmd {
             env: $env,
             pwd: $pwd,
             msg: Some($msg),
+        }
+    };
+    {
+        exe: $exe:literal,
+        env: $env:expr,
+        pwd: $pwd:expr,
+        msg: $msg:expr$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe.to_string(),
+            env: $env,
+            pwd: $pwd,
+            msg: Some($msg),
+        }
+    };
+    {
+        $exe:expr,
+        env: $env:expr,
+        pwd: $pwd:expr,
+        msg: $msg:literal$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe,
+            env: $env,
+            pwd: $pwd,
+            msg: Some($msg.to_string()),
         }
     };
     {
@@ -338,6 +412,19 @@ macro_rules! cmd {
         }
     };
     {
+        $exe:expr,
+        env: $env:expr,
+        pwd: $pwd:expr,
+        msg: Some($msg:expr)$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe,
+            env: $env,
+            pwd: $pwd,
+            msg: Some($msg),
+        }
+    };
+    {
         exe: $exe:expr,
         env: $env:expr,
         pwd: $pwd:expr,
@@ -348,6 +435,19 @@ macro_rules! cmd {
             env: $env,
             pwd: $pwd,
             msg: Some($msg),
+        }
+    };
+    {
+        $exe:expr,
+        env: $env:expr,
+        pwd: $pwd:expr,
+        msg: None$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe,
+            env: $env,
+            pwd: $pwd,
+            msg: None,
         }
     };
     {
@@ -364,6 +464,19 @@ macro_rules! cmd {
         }
     };
     {
+        $exe:expr,
+        env: $env:expr,
+        pwd: $pwd:expr,
+        msg: $msg:expr$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe,
+            env: $env,
+            pwd: $pwd,
+            msg: Some($msg),
+        }
+    };
+    {
         exe: $exe:expr,
         env: $env:expr,
         pwd: $pwd:expr,
@@ -374,6 +487,18 @@ macro_rules! cmd {
             env: $env,
             pwd: $pwd,
             msg: Some($msg),
+        }
+    };
+    {
+        $exe:literal,
+        env: $env:expr,
+        pwd: $pwd:expr$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe.to_string(),
+            env: $env,
+            pwd: $pwd,
+            msg: None,
         }
     };
     {
@@ -383,6 +508,18 @@ macro_rules! cmd {
     } => {
         $crate::Cmd {
             exe: $exe.to_string(),
+            env: $env,
+            pwd: $pwd,
+            msg: None,
+        }
+    };
+    {
+        $exe:expr,
+        env: $env:expr,
+        pwd: $pwd:expr$(,)?
+    } => {
+        $crate::Cmd {
+            exe: $exe,
             env: $env,
             pwd: $pwd,
             msg: None,
@@ -407,7 +544,17 @@ mod tests {
     use crate::{Cmd, Env, Location};
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_literal_msg_literal<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_literal_msg_literal<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! {
+          "ls",
+          env: env,
+          pwd: loc,
+          msg: "!",
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_literal_msg_literal<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: "ls",
           env: env,
@@ -417,7 +564,17 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_expr_msg_literal<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_expr_msg_literal<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! {
+          format!("ls {}", "."),
+          env: env,
+          pwd: loc,
+          msg: "!",
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_expr_msg_literal<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: format!("ls {}", "."),
           env: env,
@@ -427,7 +584,17 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_expr_msg_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_expr_msg_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! {
+          format!("ls {}", "."),
+          env: env,
+          pwd: loc,
+          msg: format!("!"),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_expr_msg_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: format!("ls {}", "."),
           env: env,
@@ -437,7 +604,17 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_literal_msg_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_literal_msg_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! {
+          "ls",
+          env: env,
+          pwd: loc,
+          msg: format!("!"),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_literal_msg_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: "ls",
           env: env,
@@ -447,7 +624,20 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_literal_msg_some_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_literal_msg_some_expr<Loc: Location>(
+        env: Env,
+        loc: Loc,
+    ) -> Cmd<Loc> {
+        cmd! {
+          "ls",
+          env: env,
+          pwd: loc,
+          msg: Some(format!("!")),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_literal_msg_some_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: "ls",
           env: env,
@@ -457,7 +647,17 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_expr_msg_some_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_expr_msg_some_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! {
+          format!("ls {}", "."),
+          env: env,
+          pwd: loc,
+          msg: Some(format!("!")),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_expr_msg_some_expr<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: format!("ls {}", "."),
           env: env,
@@ -467,7 +667,17 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_literal_msg_none<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_literal_msg_none<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! {
+          "ls",
+          env: env,
+          pwd: loc,
+          msg: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_literal_msg_none<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: "ls",
           env: env,
@@ -477,7 +687,17 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_expr_msg_none<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_expr_msg_none<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! {
+          format!("ls {}", "."),
+          env: env,
+          pwd: loc,
+          msg: None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_expr_msg_none<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: format!("ls {}", "."),
           env: env,
@@ -487,7 +707,16 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_literal_no_msg<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_literal_no_msg<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! {
+          "ls",
+          env: env,
+          pwd: loc,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_literal_no_msg<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: "ls",
           env: env,
@@ -496,7 +725,16 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_exe_expr_no_msg<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_expr_no_msg<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! {
+          format!("ls {}", "."),
+          env: env,
+          pwd: loc,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_expr_no_msg<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! {
           exe: format!("ls {}", "."),
           env: env,
@@ -505,7 +743,12 @@ mod tests {
     }
 
     #[allow(dead_code)]
-    fn cmd_macro_no_trailing_comma<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+    fn cmd_macro_unlabeled_exe_no_trailing_comma<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
+        cmd! { "ls", env: env, pwd: loc }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_macro_labeled_exe_no_trailing_comma<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! { exe: "ls", env: env, pwd: loc }
     }
 }

@@ -79,7 +79,7 @@ mod client {
 
     pub fn build() -> Cmd {
         cmd! {
-            exe: "rescript build -with-deps",
+            "rescript build -with-deps",
             env: env(),
             pwd: Loc::client(),
             msg: "Building ReScript client",
@@ -91,7 +91,7 @@ mod client {
             tag: "rescript",
             cmd:
                 cmd! {
-                    exe: "rescript build -w",
+                    "rescript build -w",
                     env: env(),
                     pwd: Loc::client(),
                     msg: "Watching ReScript client",
@@ -105,7 +105,7 @@ mod server {
 
     pub fn build() -> Cmd {
         cmd! {
-            exe: "cargo build --package=server",
+            "cargo build --package=server",
             env: Config::to_env(),
             pwd: Loc::root(),
             msg: "Building Rust server",
@@ -117,7 +117,7 @@ mod server {
             tag: "server",
             cmd:
                 cmd! {
-                    exe: "cargo watch --watch server --exec 'run --package=server --color=always'",
+                    "cargo watch --watch server --exec 'run --package=server --color=always'",
                     env: Config::to_env(),
                     pwd: Loc::root(),
                     msg: "Running reloadable Rust server",

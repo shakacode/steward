@@ -33,7 +33,7 @@
 //! mod server {
 //!     fn build_cmd() -> Cmd {
 //!         cmd! {
-//!           exe: "cargo build",
+//!           "cargo build",
 //!           env: Env::empty(),
 //!           pwd: Loc::root(),
 //!           msg: "Building a server",
@@ -44,7 +44,7 @@
 //!         process! {
 //!           tag: "server",
 //!           cmd: cmd! {
-//!             exe: "cargo watch",
+//!             "cargo watch",
 //!             env: Env::empty(),
 //!             pwd: Loc::root(),
 //!             msg: "Running a reloadable server",
@@ -56,7 +56,7 @@
 //! mod client {
 //!     fn build_cmd() -> Cmd {
 //!         cmd! {
-//!           exe: "npm build",
+//!           "npm build",
 //!           env: Env::empty(),
 //!           pwd: Loc::root(),
 //!           msg: "Building a client",
@@ -67,7 +67,7 @@
 //!         process! {
 //!           tag: "client",
 //!           cmd: cmd! {
-//!             exe: "npm watch",
+//!             "npm watch",
 //!             env: Env::empty(),
 //!             pwd: Loc::root(),
 //!             msg: "Watching a client",
@@ -86,7 +86,7 @@
 /// ```ignore
 /// async fn build() -> steward::Result<()> {
 ///     let build_cmd = cmd! {
-///         exe: "cargo build",
+///         "cargo build",
 ///         env: Env::empty(),
 ///         pwd: Loc::root(),
 ///         msg: "Building a server",
@@ -104,7 +104,7 @@ pub mod cmd;
 ///     let server_process = process! {
 ///         tag: "server",
 ///         cmd: cmd! {
-///             exe: "cargo watch",
+///             "cargo watch",
 ///             env: Env::empty(),
 ///             pwd: Loc::root(),
 ///             msg: "Running a reloadable server",
@@ -114,7 +114,7 @@ pub mod cmd;
 ///     let client_process = process! {
 ///         tag: "client",
 ///         cmd: cmd! {
-///             exe: "rescript build -w",
+///             "rescript build -w",
 ///             env: Env::empty(),
 ///             pwd: Loc::root(),
 ///             msg: "Watching a client",
