@@ -2,7 +2,7 @@
 name = "steward"
 description = "Task runner and process manager for Rust"
 version = "0.0.6"
-authors = ["Alex Fedoseev <alex@fedoseev.mx>"]
+authors = ["Alex Fedoseev <alex@35mil.me>"]
 readme = "./README.md"
 homepage = "https://github.com/alexfedoseev/steward"
 repository = "https://github.com/alexfedoseev/steward"
