@@ -1,5 +1,8 @@
 # Changelog
 
+### 0.0.7
+- Add [`print`](https://docs.rs/steward/latest/steward/fn.print.html) function.
+
 ### 0.0.6
 - Allow unlabeled command:
 

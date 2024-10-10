@@ -16,6 +16,21 @@ macro_rules! headline {
     }};
 }
 
+/// Prints a formatted message to console.
+///
+/// ```rust
+/// steward::print("Nothing to do. Exiting.")
+/// ```
+///
+/// would print
+///
+/// ```sh
+/// ❯ Nothing to do. Exiting.
+/// ```
+pub fn print(msg: impl Display) {
+    eprintln!("{}", self::plain_headline(msg))
+}
+
 pub(crate) fn plain_headline(msg: impl Display) -> String {
     format!("❯ {}", console::style(msg).bold())
 }

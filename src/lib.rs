@@ -204,6 +204,7 @@ mod loc;
 pub use cmd::{Cmd, KillTimeout, SpawnOptions};
 pub use dep::{Dependency, DependencyWaitError};
 pub use env::Env;
+pub use fmt::print;
 pub use fs::FsEntry;
 pub use fun::{run, run_mut, run_once};
 pub use loc::Location;
