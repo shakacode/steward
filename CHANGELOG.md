@@ -1,6 +1,6 @@
 # Changelog
 
-### UNRELEASED
+### 0.0.8
 - [BREAKING] Simplify `Output`: now a struct instead of enum. Use `Output::bytes()` (was `unwrap()`) and `Output::as_string()` (was `unwrap_string()`). Interrupted and killed processes now return `Err(Error::Interrupted)` and `Err(Error::Killed)` instead of `Ok` variants.
 - Add process group support via `SpawnOptions::group`.
 - Add borrowed `IntoIterator` impl for `Env`.
