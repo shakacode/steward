@@ -38,7 +38,7 @@ pub trait Location: Sized + Send + Sync {
 ///
 /// # Syntax
 ///
-/// ```text
+/// ```ignore
 /// loc! {
 ///     src,                          // fn src() -> Loc
 ///     ".env": env_file,             // fn env_file() -> Loc for ".env"
@@ -164,6 +164,7 @@ pub trait Location: Sized + Send + Sync {
 /// }
 ///
 /// // Generated functions:
+/// // fn src() -> Loc         // ROOT.join("src")
 /// // fn main() -> Loc        // ROOT.join("src/main")
 /// // fn lib() -> Loc         // ROOT.join("src/lib")
 /// // fn cargo_toml() -> Loc  // ROOT.join("Cargo.toml")
