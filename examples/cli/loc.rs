@@ -1,6 +1,7 @@
 use std::{
-    fmt,
+    env, fmt,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 
 use steward::Location;
@@ -9,57 +10,43 @@ use steward::Location;
 #[derive(Clone, Debug)]
 pub struct Loc(PathBuf);
 
-lazy_static! {
-    // We want to find root once per execution and then reuse it
-    static ref ROOT: Loc = Loc::find_root();
+static ROOT: LazyLock<Loc> = LazyLock::new(Loc::find_root);
+
+loc! {
+    ".env": env_file,
+    client => {
+        node_modules: client_node_modules => {
+            ".bin": client_node_modules_bin,
+        },
+    },
 }
 
 impl Loc {
     pub fn root() -> Self {
-        ROOT.to_owned()
+        ROOT.clone()
     }
-
-    pub fn env_file() -> Self {
-        ROOT.join(".env")
-    }
-
-    pub fn client() -> Self {
-        ROOT.join("client")
-    }
-
-    pub fn client_node_modules() -> Self {
-        Loc::client().join("node_modules")
-    }
-
-    pub fn client_node_modules_bin() -> Self {
-        Loc::client_node_modules().join(".bin")
-    }
-}
-
-impl Loc {
-    // Using `Cargo.lock` as a marker of a root directory of the project
-    // If user runs a cli from subdirectory, we traverse up the directory tree
-    // until `Cargo.lock` is found so all paths defined above still resolved correctly.
-    const ROOT_MARKER: &'static str = "Cargo.lock";
 
     fn find_root() -> Self {
-        let cwd = std::env::current_dir().expect("Failed to get current directory of the process");
-        Self(Self::traverse(cwd))
-    }
+        const ROOT_MARKER: &str = "Cargo.lock";
 
-    fn traverse(dir: PathBuf) -> PathBuf {
-        if dir.join(Self::ROOT_MARKER).exists() {
-            dir
-        } else {
-            Self::traverse(
-                dir.parent()
-                    .expect("Failed to get parent directory during root search")
-                    .to_path_buf(),
-            )
+        let cwd = env::current_dir().expect("Failed to get current directory of the process");
+
+        fn traverse(dir: PathBuf) -> Loc {
+            if dir.join(ROOT_MARKER).exists() {
+                Loc(dir)
+            } else {
+                traverse(
+                    dir.parent()
+                        .expect("Failed to get parent directory during root search")
+                        .to_path_buf(),
+                )
+            }
         }
+
+        traverse(cwd)
     }
 
-    fn join<P: AsRef<Path>>(&self, path: P) -> Self {
+    pub fn join<P: AsRef<Path>>(&self, path: P) -> Self {
         Self(self.as_path().join(path))
     }
 
@@ -89,3 +76,4 @@ impl fmt::Display for Loc {
         write!(f, "{}", self.as_path().to_str().unwrap())
     }
 }
+

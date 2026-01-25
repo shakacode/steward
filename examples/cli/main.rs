@@ -1,7 +1,5 @@
 #[macro_use]
 extern crate steward;
-#[macro_use]
-extern crate lazy_static;
 
 mod config;
 mod loc;
@@ -21,7 +19,7 @@ pub type ProcessPool = steward::ProcessPool;
 #[clap(
     name = "steward-demo",
     version = "1.0",
-    author = "Alex Fedoseev <alex@fedoseev.mx>"
+    author = "Alex Fedoseev <alex@35mil.me>"
 )]
 pub struct Cli {
     #[arg(long, help = "Run a process pool with dependent porcesses")]
@@ -70,18 +68,18 @@ async fn main() -> steward::Result<()> {
 mod client {
     use steward::env::{Env, PATH};
 
-    use crate::{Cmd, Loc, Process};
+    use crate::{loc, Cmd, Process};
 
     fn env() -> Env {
         // Extending PATH with node_modules binaries
-        Env::one("PATH", PATH::extend(Loc::client_node_modules_bin()))
+        Env::one("PATH", PATH::extend(loc::client_node_modules_bin()))
     }
 
     pub fn build() -> Cmd {
         cmd! {
             "rescript build -with-deps",
             env: env(),
-            pwd: Loc::client(),
+            pwd: loc::client(),
             msg: "Building ReScript client",
         }
     }
@@ -93,7 +91,7 @@ mod client {
                 cmd! {
                     "rescript build -w",
                     env: env(),
-                    pwd: Loc::client(),
+                    pwd: loc::client(),
                     msg: "Watching ReScript client",
                 }
         }

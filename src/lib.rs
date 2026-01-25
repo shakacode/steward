@@ -199,6 +199,7 @@ pub mod result;
 #[macro_use]
 mod fmt;
 mod fun;
+#[macro_use]
 mod loc;
 
 pub use cmd::{Cmd, KillTimeout, SpawnOptions};
