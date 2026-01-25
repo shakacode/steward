@@ -46,10 +46,6 @@ impl Loc {
         traverse(cwd)
     }
 
-    pub fn join<P: AsRef<Path>>(&self, path: P) -> Self {
-        Self(self.as_path().join(path))
-    }
-
     pub fn path(&self) -> &PathBuf {
         &self.0
     }
@@ -62,6 +58,10 @@ impl Location for Loc {
 
     fn as_path(&self) -> &PathBuf {
         self.path()
+    }
+
+    fn join<P: AsRef<Path>>(&self, path: P) -> Self {
+        Self(self.as_path().join(path))
     }
 }
 
@@ -76,4 +76,3 @@ impl fmt::Display for Loc {
         write!(f, "{}", self.as_path().to_str().unwrap())
     }
 }
-

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A location of file or directory of a project.
 ///
@@ -15,6 +15,9 @@ pub trait Location: Sized + Send + Sync {
 
     /// Returns a pointer to an inner path.
     fn as_path(&self) -> &PathBuf;
+
+    /// Joins a path to the current location.
+    fn join<P: AsRef<Path>>(&self, path: P) -> Self;
 
     /// Formats a path as a relative to the root directory for printing to console.
     fn display(&self) -> String {
@@ -54,8 +57,8 @@ pub trait Location: Sized + Send + Sync {
 /// # Requirements
 ///
 /// The macro expects the following to be defined in scope:
-/// - `ROOT: Loc` - A static reference to the root location
-/// - `Loc` - A type with a `join` method that accepts a path string
+/// - `ROOT` - A static that dereferences to `Loc`
+/// - `Loc` - A type that implements [`Location`] trait
 ///
 /// # Examples
 ///
@@ -152,15 +155,12 @@ pub trait Location: Sized + Send + Sync {
 ///
 ///         traverse(cwd)
 ///     }
-///
-///     pub fn join<P: AsRef<Path>>(&self, path: P) -> Self {
-///         Self(self.0.join(path))
-///     }
 /// }
 ///
 /// impl Location for Loc {
 ///     fn apex() -> Self { ROOT.clone() }
 ///     fn as_path(&self) -> &PathBuf { &self.0 }
+///     fn join<P: AsRef<Path>>(&self, path: P) -> Self { Self(self.0.join(path)) }
 /// }
 ///
 /// // Generated functions:
