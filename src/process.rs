@@ -37,11 +37,11 @@ enum CtrlCResult {
     Timeout,
 }
 
-pub(crate) enum ExitResult {
-    Output(Output),
-    Interrupted,
-    Killed { pid: u32 },
-}
+// pub(crate) enum ExitResult {
+//     Output(Output),
+//     Interrupted,
+//     Killed { pid: u32 },
+// }
 
 impl<Loc> Process<Loc>
 where
@@ -124,6 +124,7 @@ macro_rules! process {
 pub struct RunningProcess {
     pub(crate) process: Child,
     pub(crate) timeout: KillTimeout,
+    pub(crate) group: bool,
 }
 
 impl RunningProcess {
@@ -145,7 +146,7 @@ impl RunningProcess {
         self.process.stderr.take()
     }
 
-    pub(crate) async fn wait(self) -> Result<ExitResult> {
+    pub(crate) async fn wait(self) -> Result<Output> {
         let process = self.process;
 
         let pid = match process.id() {
@@ -168,7 +169,7 @@ impl RunningProcess {
                 result =
                   process_task =>
                     TeardownReason::ProcessFinished(
-                      result.unwrap_or_else(|err| Err(io::Error::new(io::ErrorKind::Other, err)))
+                      result.unwrap_or_else(|err| Err(io::Error::other(err)))
                     ),
                 _ = signal::ctrl_c() => TeardownReason::CtrlC,
             }
@@ -178,7 +179,7 @@ impl RunningProcess {
             TeardownReason::ProcessFinished(result) => {
                 let output = result?;
                 if output.status.success() {
-                    Ok(ExitResult::Output(output))
+                    Ok(output)
                 } else {
                     Err(output.into())
                 }
@@ -200,9 +201,9 @@ impl RunningProcess {
                 };
 
                 match res {
-                    CtrlCResult::ProcessExited => Ok(ExitResult::Interrupted),
+                    CtrlCResult::ProcessExited => Err(Error::Interrupted),
                     CtrlCResult::Timeout => match Self::kill(pid) {
-                        Ok(()) => Ok(ExitResult::Killed { pid }),
+                        Ok(()) => Err(Error::Killed { pid }),
                         Err(err) => Err(err),
                     },
                 }
@@ -220,36 +221,50 @@ impl RunningProcess {
 
         match self.process.id() {
             None => Err(Error::ProcessDoesNotExist),
-            Some(pid) => match signal::kill(Pid::from_raw(pid as i32), Signal::SIGINT) {
-                Ok(()) => {
-                    let process = &mut self.process;
+            Some(pid) => {
+                // When group is true, use negative PID to signal the entire process group
+                let target = Pid::from_raw(if self.group {
+                    -(pid as i32)
+                } else {
+                    pid as i32
+                });
 
-                    let res = tokio::select! {
-                        res = process.wait() => Some(res),
-                        _ = time::sleep(*self.timeout) => None,
-                    };
+                match signal::kill(target, Signal::SIGINT) {
+                    Ok(()) => {
+                        let process = &mut self.process;
 
-                    match res {
-                        Some(Ok(_)) => Ok(()),
-                        Some(Err(error)) => {
-                            eprintln!("⚠️ IO error on SIGINT: {error}. Killing the process {pid}.");
-                            Self::kill(pid)
-                        }
-                        None => {
-                            eprintln!("⚠️ SIGINT timeout. Killing the process {pid}.");
-                            Self::kill(pid)
+                        let res = tokio::select! {
+                            res = process.wait() => Some(res),
+                            _ = time::sleep(*self.timeout) => None,
+                        };
+
+                        match res {
+                            Some(Ok(_)) => Ok(()),
+                            Some(Err(error)) => {
+                                eprintln!(
+                                    "⚠️ IO error on SIGINT: {error}. Killing the process {pid}."
+                                );
+                                signal::kill(target, Signal::SIGKILL)
+                                    .map_err(|err| Error::Zombie { pid, err })
+                            }
+                            None => {
+                                eprintln!("⚠️ SIGINT timeout. Killing the process {pid}.");
+                                signal::kill(target, Signal::SIGKILL)
+                                    .map_err(|err| Error::Zombie { pid, err })
+                            }
                         }
                     }
+                    Err(error) => {
+                        eprintln!("⚠️ Failed to terminate the process {pid}. {error}. Killing it.");
+                        signal::kill(target, Signal::SIGKILL)
+                            .map_err(|err| Error::Zombie { pid, err })
+                    }
                 }
-                Err(error) => {
-                    eprintln!("⚠️ Failed to terminate the process {pid}. {error}. Killing it.");
-                    Self::kill(pid)
-                }
-            },
+            }
         }
     }
 
-    // TODO: Implemetn RunningProcess::stop for windows
+    // TODO: Implement RunningProcess::stop for windows
 
     #[cfg(unix)]
     pub(crate) fn kill(pid: u32) -> Result<()> {
@@ -492,6 +507,7 @@ impl ProcessPool {
                         stdout: Stdio::piped(),
                         stderr: Stdio::piped(),
                         timeout: timeout.to_owned(),
+                        ..Default::default()
                     };
 
                     let mut process = process.spawn(opts).await.unwrap_or_else(|err| {
@@ -537,15 +553,15 @@ impl ProcessPool {
                     let res = process.wait().await;
 
                     match res {
-                        Ok(ExitResult::Output(_)) => eprintln!(
+                        Ok(_) => eprintln!(
                             "{} Process {} exited with code 0.",
                             colored_tag_col, colored_tag
                         ),
-                         Ok(ExitResult::Interrupted) => eprintln!(
+                         Err(Error::Interrupted) => eprintln!(
                             "{} Process {} successfully exited.",
                             colored_tag_col, colored_tag
                         ),
-                        Ok(ExitResult::Killed { pid }) => eprintln!(
+                        Err(Error::Killed { pid }) => eprintln!(
                             "{} Process {} with pid {pid} was killed due to timeout.",
                             colored_tag_col,
                             colored_tag,

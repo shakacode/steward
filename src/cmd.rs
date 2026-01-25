@@ -1,14 +1,9 @@
-use std::{
-    io,
-    ops::Deref,
-    process::{self, Stdio},
-    time::Duration,
-};
+use std::{io, ops::Deref, process::Stdio, time::Duration};
 
 use once_cell::sync::Lazy;
 use tokio::process::Command;
 
-use crate::{Env, ExitResult, Location, Result, RunningProcess};
+use crate::{Env, Location, Result, RunningProcess};
 
 /// Struct holds a specification of a command. Can be used for running one-off commands, long running processes etc.
 #[derive(Clone)]
@@ -114,6 +109,9 @@ pub struct SpawnOptions {
     pub stderr: Stdio,
     /// Amount of time to wait before killing hanged process. See [`KillTimeout`](crate::KillTimeout).
     pub timeout: KillTimeout,
+    /// Whether to create a new process group. When true, the spawned process becomes
+    /// a process group leader, allowing all its children to be killed together.
+    pub group: bool,
 }
 
 impl Default for SpawnOptions {
@@ -122,32 +120,25 @@ impl Default for SpawnOptions {
             stdout: Stdio::inherit(),
             stderr: Stdio::inherit(),
             timeout: KillTimeout::default(),
+            group: false,
         }
     }
 }
 
 /// Enum returned from [`Cmd::output`](Cmd::output).
-pub enum Output {
-    /// Bytes collected from stdout.
-    Data(Vec<u8>),
-    /// Returned when child process has been interrupted (e.g. user pressed Ctrl + C).
-    Interrupted,
-}
+pub struct Output(Vec<u8>);
 
 impl Output {
     /// Returns bytes from stdout. Be aware that if child process was interrupted
     /// during the command execution (e.g. user pressed Ctrl + C), this function will terminate
     /// current process with zero exit code.
-    pub fn unwrap(self) -> Vec<u8> {
-        match self {
-            Self::Data(bytes) => bytes,
-            Self::Interrupted => process::exit(0), // not sure if this is the right thing to do
-        }
+    pub fn bytes(self) -> Vec<u8> {
+        self.0
     }
 
-    /// Same as [`Output::unwrap`](Output::unwrap) but attempts to convert bytes to `String`.
-    pub fn unwrap_string(self) -> Result<String> {
-        let bytes = self.unwrap();
+    /// Same as [`Output::bytes`](Output::bytes) but attempts to convert bytes to `String`.
+    pub fn as_string(self) -> Result<String> {
+        let bytes = self.bytes();
         let string = String::from_utf8(bytes)?;
         Ok(string)
     }
@@ -211,13 +202,11 @@ where
 
         let res = self.spawn(opts)?.wait().await?;
 
-        match res {
-            ExitResult::Output(output) => Ok(Output::Data(output.stdout)),
-            ExitResult::Interrupted | ExitResult::Killed { pid: _ } => Ok(Output::Interrupted),
-        }
+        Ok(Output(res.stdout))
     }
 
     /// A low-level method for spawning a process and getting a handle to it.
+    #[cfg(unix)]
     pub fn spawn(&self, opts: SpawnOptions) -> io::Result<RunningProcess> {
         let cmd = self;
 
@@ -225,17 +214,57 @@ where
             stdout,
             stderr,
             timeout,
+            group,
         } = opts;
 
-        let process = Command::new(Cmd::<Loc>::SHELL)
+        let mut command = Command::new(Cmd::<Loc>::SHELL);
+        command
             .args(Cmd::<Loc>::shelled(&cmd.exe))
             .envs(cmd.env.to_owned())
             .current_dir(cmd.pwd.as_path())
             .stdout(stdout)
-            .stderr(stderr)
-            .spawn()?;
+            .stderr(stderr);
 
-        Ok(RunningProcess { process, timeout })
+        if group {
+            command.process_group(0);
+        }
+
+        let process = command.spawn()?;
+
+        Ok(RunningProcess {
+            process,
+            timeout,
+            group,
+        })
+    }
+
+    /// A low-level method for spawning a process and getting a handle to it.
+    #[cfg(windows)]
+    pub fn spawn(&self, opts: SpawnOptions) -> io::Result<RunningProcess> {
+        let cmd = self;
+
+        let SpawnOptions {
+            stdout,
+            stderr,
+            timeout,
+            group,
+        } = opts;
+
+        let mut command = Command::new(Cmd::<Loc>::SHELL);
+        command
+            .args(Cmd::<Loc>::shelled(&cmd.exe))
+            .envs(cmd.env.to_owned())
+            .current_dir(cmd.pwd.as_path())
+            .stdout(stdout)
+            .stderr(stderr);
+
+        let process = command.spawn()?;
+
+        Ok(RunningProcess {
+            process,
+            timeout,
+            group,
+        })
     }
 }
 

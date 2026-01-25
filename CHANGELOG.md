@@ -1,5 +1,9 @@
 # Changelog
 
+### UNRELEASED
+- [BREAKING] Simplify `Output`: now a struct instead of enum. Use `Output::bytes()` (was `unwrap()`) and `Output::as_string()` (was `unwrap_string()`). Interrupted and killed processes now return `Err(Error::Interrupted)` and `Err(Error::Killed)` instead of `Ok` variants.
+- Add process group support via `SpawnOptions::group`.
+
 ### 0.0.7
 - Add [`print`](https://docs.rs/steward/latest/steward/fn.print.html) function.
 

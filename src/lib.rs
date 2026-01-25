@@ -211,5 +211,3 @@ pub use loc::Location;
 pub use net::{HttpMethod, HttpService, TcpService};
 pub use process::{PoolEntry, Process, ProcessPool, RunningProcess};
 pub use result::{Error, Result};
-
-pub(crate) use process::ExitResult;
