@@ -46,16 +46,16 @@ pub struct TcpService {
 impl TcpService {
     /// Consructs new TcpService.
     pub fn new(
-        tag: impl Into<String>,
+        tag: impl fmt::Display,
         host: impl fmt::Display,
         port: impl fmt::Display,
         timeout: Duration,
         warm_up: Option<Duration>,
     ) -> Result<Self, AddrParseError> {
-        let addr = format!("{}:{}", host, port).parse()?;
+        let addr = format!("{host}:{port}").parse()?;
 
         Ok(Self {
-            tag: tag.into(),
+            tag: tag.to_string(),
             addr,
             timeout,
             warm_up,
@@ -80,12 +80,12 @@ impl Dependency for TcpService {
         let start = Instant::now();
 
         loop {
-            match time::timeout(
-                self.timeout - start.elapsed(),
-                TcpStream::connect(&self.addr),
-            )
-            .await
-            {
+            let remaining = self.timeout.saturating_sub(start.elapsed());
+            if remaining.is_zero() {
+                return Err(Box::new(NetServiceWaitError::Timeout));
+            }
+
+            match time::timeout(remaining, TcpStream::connect(&self.addr)).await {
                 Ok(Ok(mut stream)) => {
                     if let Err(error) = stream.shutdown().await {
                         eprintln!("Failed to close socket: {}", error);
@@ -101,10 +101,6 @@ impl Dependency for TcpService {
                 Err(_) => {
                     return Err(Box::new(NetServiceWaitError::Timeout));
                 }
-            }
-
-            if start.elapsed() >= self.timeout {
-                return Err(Box::new(NetServiceWaitError::Timeout));
             }
 
             time::sleep(ITER_GAP).await;
@@ -164,7 +160,7 @@ impl From<hyper::Response<Body>> for HttpError {
 impl HttpService {
     /// Consructs new HttpService.
     pub fn new(
-        tag: impl Into<String>,
+        tag: impl fmt::Display,
         host: impl fmt::Display,
         port: impl fmt::Display,
         path: impl fmt::Display,
@@ -172,17 +168,10 @@ impl HttpService {
         method: HttpMethod,
         timeout: Duration,
     ) -> Result<Self, InvalidUri> {
-        let addr = format!(
-            "http{}://{}:{}{}",
-            if ssl { "s" } else { "" },
-            host,
-            port,
-            path
-        )
-        .parse()?;
+        let addr = format!("http{}://{host}:{port}{path}", if ssl { "s" } else { "" }).parse()?;
 
         Ok(Self {
-            tag: tag.into(),
+            tag: tag.to_string(),
             addr,
             method,
             timeout,
@@ -242,16 +231,17 @@ impl Dependency for HttpService {
                 let client = Client::builder().build(connector);
 
                 loop {
+                    let remaining = self.timeout.saturating_sub(start.elapsed());
+                    if remaining.is_zero() {
+                        return Err(Box::new(NetServiceWaitError::Timeout));
+                    }
+
                     let req = self.build_req();
 
-                    match time::timeout(self.timeout - start.elapsed(), client.request(req)).await {
+                    match time::timeout(remaining, client.request(req)).await {
                         Ok(Ok(res)) => return Self::handle_res(res),
                         Ok(Err(_)) => (),
                         Err(_) => return Err(Box::new(NetServiceWaitError::Timeout)),
-                    }
-
-                    if start.elapsed() >= self.timeout {
-                        return Err(Box::new(NetServiceWaitError::Timeout));
                     }
 
                     time::sleep(ITER_GAP).await;
@@ -262,16 +252,17 @@ impl Dependency for HttpService {
                 let client = Client::builder().build(connector);
 
                 loop {
+                    let remaining = self.timeout.saturating_sub(start.elapsed());
+                    if remaining.is_zero() {
+                        return Err(Box::new(NetServiceWaitError::Timeout));
+                    }
+
                     let req = self.build_req();
 
-                    match time::timeout(self.timeout - start.elapsed(), client.request(req)).await {
+                    match time::timeout(remaining, client.request(req)).await {
                         Ok(Ok(res)) => return Self::handle_res(res),
                         Ok(Err(_)) => (),
                         Err(_) => return Err(Box::new(NetServiceWaitError::Timeout)),
-                    }
-
-                    if start.elapsed() >= self.timeout {
-                        return Err(Box::new(NetServiceWaitError::Timeout));
                     }
 
                     time::sleep(ITER_GAP).await;

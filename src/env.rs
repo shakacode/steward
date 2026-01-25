@@ -80,6 +80,18 @@ impl IntoIterator for Env {
     }
 }
 
+impl<'a> IntoIterator for &'a Env {
+    type Item = (&'a str, &'a str);
+    type IntoIter = std::iter::Map<
+        hash_map::Iter<'a, String, String>,
+        fn((&'a String, &'a String)) -> (&'a str, &'a str),
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+    }
+}
+
 /// Convenience struct for dealing with the `PATH` environment variable.
 pub struct PATH;
 
