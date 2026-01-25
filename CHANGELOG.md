@@ -1,5 +1,8 @@
 # Changelog
 
+### 0.0.10
+- [BREAKING] Add `join` method to `Location` trait.
+
 ### 0.0.9
 - Fix `loc!` macro documentation.
 
