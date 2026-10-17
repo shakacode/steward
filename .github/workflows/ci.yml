@@ -4,81 +4,101 @@ on:
   pull_request:
     branches:
       - master
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
 
 jobs:
   check:
-    name: Check
+    name: Check & Test
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-latest, macOS-latest ] # windows build is broken, see the note in README
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install toolchain
-        id: toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          profile: minimal
-          toolchain: 1.78.0
-          override: true
+          toolchain: "1.85.0"
           components: rustfmt, clippy
 
-      - name: Cache lib dependencies
-        uses: actions/cache@v1.0.1
-        with:
-          path: target
-          key: pr-build-lib-${{ steps.toolchain.outputs.rustc_hash }}-${{ hashFiles('./Cargo.lock') }}
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
 
-      - name: Cache examples dependencies
-        uses: actions/cache@v1.0.1
-        with:
-          path: examples/target
-          key: pr-build-examples-${{ steps.toolchain.outputs.rustc_hash }}-${{ hashFiles('./examples/Cargo.lock') }}
+      - name: Run cargo check
+        run: cargo check --all-targets
 
-      - name: Run cargo check against lib
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
+      - name: Run cargo test
+        run: cargo test
 
-      - name: Run cargo check against examples
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --manifest-path examples/Cargo.toml
+      - name: Run cargo fmt
+        run: cargo fmt --all -- --check
 
-      - name: Run cargo test against lib
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+      - name: Run cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
 
-      - name: Run cargo test against examples
-        uses: actions-rs/cargo@v1
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          command: test
-          args: --manifest-path examples/Cargo.toml
+          persist-credentials: false
 
-      - name: Run cargo fmt against lib
-        uses: actions-rs/cargo@v1
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          command: fmt
-          args: --all -- --check
+          toolchain: stable
 
-      - name: Run cargo fmt against examples
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all --manifest-path examples/Cargo.toml -- --check
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
 
-      - name: Run cargo clippy against lib
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -D warnings
+      # Audit suppressions — all transitive dependencies with no patched release available:
+      #   RUSTSEC-2023-0022: openssl X509NameBuilder::build not thread-safe (via hyper-tls)
+      #   RUSTSEC-2023-0023: openssl SAN/ExtendedKeyUsage injection (via hyper-tls)
+      #   RUSTSEC-2023-0024: openssl crash on None context arg (via hyper-tls)
+      #   RUSTSEC-2023-0044: openssl buffer over-read in set_host <0.10.55 (via hyper-tls)
+      #   RUSTSEC-2023-0072: openssl X509StoreRef::objects aliasing (via hyper-tls)
+      #   RUSTSEC-2023-0018: remove_dir_all symlink TOCTOU race (transitive dev-dep)
+      #   RUSTSEC-2024-0357: openssl MemBio::get_buf UB on empty buffer (via hyper-tls)
+      #   RUSTSEC-2025-0004: openssl lifetime mismatch in protocol selection (via hyper-tls)
+      - name: Run cargo audit
+        run: >
+          cargo audit
+          --ignore RUSTSEC-2023-0022
+          --ignore RUSTSEC-2023-0023
+          --ignore RUSTSEC-2023-0024
+          --ignore RUSTSEC-2023-0044
+          --ignore RUSTSEC-2023-0072
+          --ignore RUSTSEC-2023-0018
+          --ignore RUSTSEC-2024-0357
+          --ignore RUSTSEC-2025-0004
 
-      - name: Run cargo clippy against examples
-        uses: actions-rs/cargo@v1
+  msrv:
+    name: MSRV Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          command: clippy
-          args: --manifest-path examples/Cargo.toml -- -D warnings
+          persist-credentials: false
+
+      - name: Install MSRV toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: "1.85.0"
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+
+      - name: Verify build on MSRV
+        run: cargo check --all-targets

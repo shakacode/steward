@@ -2,7 +2,7 @@ use std::{
     io,
     process::{Output, Stdio},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -18,6 +18,7 @@ use tokio::{
 use crate::{Cmd, Dependency, Error, KillTimeout, Location, Result, SpawnOptions};
 
 /// Long running process. Can be constructed via [`Process::new`](Process::new) or convenience [`process!`](crate::process!) macro.
+#[derive(Debug)]
 pub struct Process<Loc> {
     /// Tag used as an identificator in output when process runs as a part of a [`ProcessPool`](ProcessPool).
     pub tag: &'static str,
@@ -121,9 +122,11 @@ macro_rules! process {
 }
 
 /// Wrapper around a running child process.
+#[derive(Debug)]
 pub struct RunningProcess {
     pub(crate) process: Child,
     pub(crate) timeout: KillTimeout,
+    #[allow(dead_code)]
     pub(crate) group: bool,
 }
 
@@ -138,14 +141,17 @@ impl RunningProcess {
         self.process
     }
 
+    /// Takes the stdout handle from the child process.
     pub(crate) fn stdout(&mut self) -> Option<ChildStdout> {
         self.process.stdout.take()
     }
 
+    /// Takes the stderr handle from the child process.
     pub(crate) fn stderr(&mut self) -> Option<ChildStderr> {
         self.process.stderr.take()
     }
 
+    /// Waits for the process to exit, handling Ctrl+C gracefully.
     pub(crate) async fn wait(self) -> Result<Output> {
         let process = self.process;
 
@@ -154,25 +160,14 @@ impl RunningProcess {
             None => return Err(Error::ProcessDoesNotExist),
         };
 
-        let process_exited = Arc::new(AtomicBool::new(false));
+        let mut process_task = task::spawn(async move { process.wait_with_output().await });
 
-        let exit_reason = {
-            let process_exited = process_exited.clone();
-
-            let process_task = task::spawn(async move {
-                let res = process.wait_with_output().await;
-                process_exited.store(true, Ordering::SeqCst);
-                res
-            });
-
-            tokio::select! {
-                result =
-                  process_task =>
-                    TeardownReason::ProcessFinished(
-                      result.unwrap_or_else(|err| Err(io::Error::other(err)))
-                    ),
-                _ = signal::ctrl_c() => TeardownReason::CtrlC,
-            }
+        let exit_reason = tokio::select! {
+            result = &mut process_task =>
+                TeardownReason::ProcessFinished(
+                    result.unwrap_or_else(|err| Err(io::Error::other(err)))
+                ),
+            _ = signal::ctrl_c() => TeardownReason::CtrlC,
         };
 
         match exit_reason {
@@ -185,19 +180,14 @@ impl RunningProcess {
                 }
             }
             TeardownReason::CtrlC => {
-                let res = {
-                    let process_exited = process_exited.clone();
-                    let exit_checker = task::spawn(async move {
-                        loop {
-                            if process_exited.load(Ordering::SeqCst) {
-                                break;
-                            }
+                let res = tokio::select! {
+                    result = &mut process_task => {
+                        match result {
+                            Ok(Ok(output)) if output.status.success() => CtrlCResult::ProcessExited,
+                            _ => CtrlCResult::ProcessExited,
                         }
-                    });
-                    tokio::select! {
-                        _ = exit_checker => CtrlCResult::ProcessExited,
-                        _ = time::sleep(*self.timeout) => CtrlCResult::Timeout,
                     }
+                    _ = time::sleep(*self.timeout) => CtrlCResult::Timeout,
                 };
 
                 match res {
@@ -264,9 +254,40 @@ impl RunningProcess {
         }
     }
 
-    // TODO: Implement RunningProcess::stop for windows
+    /// Tries to safely terminate a running process. If the termination didn't succeed, tries to kill it.
+    #[cfg(windows)]
+    pub async fn stop(mut self) -> Result<()> {
+        use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
+
+        match self.process.id() {
+            None => Err(Error::ProcessDoesNotExist),
+            Some(pid) => {
+                if self.group {
+                    // Process has its own group (CREATE_NEW_PROCESS_GROUP), safe to send CTRL_BREAK_EVENT
+                    let ok = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) };
+                    if ok != 0 {
+                        // Event delivered, wait for graceful exit
+                        let process = &mut self.process;
+                        let res = tokio::select! {
+                            res = process.wait() => Some(res),
+                            _ = time::sleep(*self.timeout) => None,
+                        };
+                        if let Some(Ok(_)) = res {
+                            return Ok(());
+                        }
+                    }
+                    // Event failed or timed out, fall through to forced termination
+                }
+                // No group or graceful shutdown failed: terminate immediately
+                // TODO: When group=true, this only kills the leader PID.
+                // Proper process group termination on Windows requires Job Objects.
+                Self::kill(pid)
+            }
+        }
+    }
 
     #[cfg(unix)]
+    /// Forcefully terminates a process by PID using `SIGKILL`.
     pub(crate) fn kill(pid: u32) -> Result<()> {
         use nix::{
             sys::signal::{self, Signal},
@@ -278,57 +299,33 @@ impl RunningProcess {
     }
 
     #[cfg(windows)]
+    /// Forcefully terminates a process by PID using `TerminateProcess`.
     pub(crate) fn kill(pid: u32) -> Result<()> {
-        use winapi::{
-            shared::{
-                minwindef::{BOOL, DWORD, FALSE, UINT},
-                ntdef::NULL,
-            },
-            um::{
-                errhandlingapi::GetLastError,
-                handleapi::CloseHandle,
-                processthreadsapi::{OpenProcess, TerminateProcess},
-                winnt::{HANDLE, PROCESS_TERMINATE},
-            },
+        use windows_sys::Win32::{
+            Foundation::{CloseHandle, GetLastError, FALSE, HANDLE},
+            System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE},
         };
 
-        // since we only wish to kill the process
-        const DESIRED_ACCESS: DWORD = PROCESS_TERMINATE;
-
-        const INHERIT_HANDLE: BOOL = FALSE;
-
-        // for some reason windows doesn't have any exit codes,
-        // you just use what ever you want?
-        //
-        // so we're using exit code `0` then
-        const EXIT_CODE: UINT = 0;
-
-        // windows being window you have to call this a lot
-        // so i just extracted it to its own function
-        unsafe fn get_error(pid: u32) -> Result<()> {
-            // https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-getlasterror
-            let err: DWORD = GetLastError();
-
-            Err(Error::Zombie { pid, err })
-        }
-
         unsafe {
-            // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocess
-            let handle: HANDLE = OpenProcess(DESIRED_ACCESS, INHERIT_HANDLE, pid);
-            if handle == NULL {
-                get_error(pid)?;
+            let handle: HANDLE = OpenProcess(PROCESS_TERMINATE, 0, pid);
+            if handle.is_null() {
+                return Err(Error::Zombie {
+                    pid,
+                    err: GetLastError(),
+                });
             }
 
-            // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
-            let terminate_result: BOOL = TerminateProcess(handle, EXIT_CODE);
-            if terminate_result == FALSE {
-                get_error(pid)?;
+            if TerminateProcess(handle, 0) == FALSE {
+                let err = GetLastError();
+                let _ = CloseHandle(handle);
+                return Err(Error::Zombie { pid, err });
             }
 
-            // https://docs.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle
-            let close_result: BOOL = CloseHandle(handle);
-            if close_result == FALSE {
-                get_error(pid)?;
+            if CloseHandle(handle) == FALSE {
+                return Err(Error::Zombie {
+                    pid,
+                    err: GetLastError(),
+                });
             }
         }
 
@@ -349,6 +346,22 @@ pub enum PoolEntry<Loc, Dep: ?Sized> {
         /// The dependency. See [`Dependency`](Dependency).
         dependency: Box<Dep>,
     },
+}
+
+impl<Loc: std::fmt::Debug, Dep: std::fmt::Debug + ?Sized> std::fmt::Debug for PoolEntry<Loc, Dep> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Process(process) => f.debug_tuple("Process").field(process).finish(),
+            Self::ProcessWithDep {
+                process,
+                dependency,
+            } => f
+                .debug_struct("ProcessWithDep")
+                .field("process", process)
+                .field("dependency", dependency)
+                .finish(),
+        }
+    }
 }
 
 impl<Loc> PoolEntry<Loc, dyn Dependency>
@@ -381,6 +394,7 @@ where
 /// ```ignore
 /// ProcessPool::run(vec![process_1, process_2]).await
 /// ```
+#[derive(Debug)]
 pub struct ProcessPool;
 
 impl ProcessPool {
@@ -434,17 +448,21 @@ impl ProcessPool {
         let processes: Vec<(PoolEntry<Loc, dyn Dependency>, Color)> =
             pool.into_iter().zip(colors).collect();
 
-        let processes_list = processes.iter().fold(String::new(), |acc, (entry, color)| {
-            let process = entry.process();
-            let styled = console::style(process.tag().to_string()).fg(*color).bold();
-            if acc.is_empty() {
-                styled.to_string()
-            } else {
-                format!("{}, {}", acc, styled)
-            }
-        });
+        let processes_list = processes
+            .iter()
+            .map(|(entry, color)| {
+                let process = entry.process();
+                console::style(process.tag().to_string())
+                    .fg(*color)
+                    .bold()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
 
         eprintln!("❯ {} {}", console::style("Running:").bold(), processes_list);
+        #[cfg(feature = "tracing")]
+        tracing::info!(pool_size = pool_size, "Process pool starting");
 
         for (entry, color) in processes {
             let exited_processes = exited_processes.clone();
@@ -455,19 +473,22 @@ impl ProcessPool {
                 let cmd = process.cmd();
                 let timeout = process.timeout();
                 let colored_tag = console::style(tag.to_owned()).fg(color).bold();
-                let colored_tag_col = {
+                let colored_tag_col: Arc<str> = {
                     let len = tag.len();
                     let pad = " ".repeat(if len < tag_col_length {
                         tag_col_length - len + 2
                     } else {
                         2
                     });
-                    console::style(format!(
-                        "{tag}{pad}{pipe}",
-                        tag = colored_tag,
-                        pad = pad,
-                        pipe = console::style("|").fg(color).bold()
-                    ))
+                    Arc::from(
+                        format!(
+                            "{tag}{pad}{pipe}",
+                            tag = colored_tag,
+                            pad = pad,
+                            pipe = console::style("|").fg(color).bold()
+                        )
+                        .as_str(),
+                    )
                 };
 
                 let dep_res = match dependency {
@@ -510,9 +531,19 @@ impl ProcessPool {
                         ..Default::default()
                     };
 
-                    let mut process = process.spawn(opts).await.unwrap_or_else(|err| {
-                        panic!("Failed to spawn {} process. {}", colored_tag, err)
-                    });
+                    let mut process = match process.spawn(opts).await {
+                        Ok(p) => p,
+                        Err(err) => {
+                            #[cfg(feature = "tracing")]
+                            tracing::error!(tag = tag, error = %err, "Failed to spawn process");
+                            eprintln!(
+                                "{} Failed to spawn {} process: {}",
+                                colored_tag_col, colored_tag, err
+                            );
+                            exited_processes.fetch_add(1, Ordering::SeqCst);
+                            return;
+                        }
+                    };
 
                     match process.stdout() {
                         None => eprintln!(
@@ -520,12 +551,21 @@ impl ProcessPool {
                             colored_tag_col, colored_tag
                         ),
                         Some(stdout) => {
-                            let mut reader = BufReader::new(stdout).lines();
+                            let mut reader = BufReader::new(stdout);
                             task::spawn({
                                 let tag = colored_tag_col.clone();
                                 async move {
-                                    while let Some(line) = reader.next_line().await.unwrap() {
-                                        eprintln!("{} {}", tag, line);
+                                    let mut buf = Vec::new();
+                                    loop {
+                                        buf.clear();
+                                        match reader.read_until(b'\n', &mut buf).await {
+                                            Ok(0) => break,
+                                            Ok(_) => {
+                                                let line = String::from_utf8_lossy(&buf);
+                                                eprintln!("{} {}", tag, line.trim_end());
+                                            }
+                                            Err(_) => break,
+                                        }
                                     }
                                 }
                             });
@@ -538,12 +578,21 @@ impl ProcessPool {
                             colored_tag_col, colored_tag
                         ),
                         Some(stderr) => {
-                            let mut reader = BufReader::new(stderr).lines();
+                            let mut reader = BufReader::new(stderr);
                             task::spawn({
                                 let tag = colored_tag_col.clone();
                                 async move {
-                                    while let Some(line) = reader.next_line().await.unwrap() {
-                                        eprintln!("{} {}", tag, line);
+                                    let mut buf = Vec::new();
+                                    loop {
+                                        buf.clear();
+                                        match reader.read_until(b'\n', &mut buf).await {
+                                            Ok(0) => break,
+                                            Ok(_) => {
+                                                let line = String::from_utf8_lossy(&buf);
+                                                eprintln!("{} {}", tag, line.trim_end());
+                                            }
+                                            Err(_) => break,
+                                        }
                                     }
                                 }
                             });
@@ -587,16 +636,20 @@ impl ProcessPool {
                     }
                 }
 
-                exited_processes.fetch_add(1, Ordering::Relaxed);
+                exited_processes.fetch_add(1, Ordering::SeqCst);
             });
         }
 
-        signal::ctrl_c().await.unwrap();
+        signal::ctrl_c().await.map_err(Error::IoError)?;
+        #[cfg(feature = "tracing")]
+        tracing::info!("Ctrl+C received, waiting for processes to exit");
         eprintln!(); // Prints `^C` in terminal on its own line
 
         let expire = Instant::now() + timeout;
-        while exited_processes.load(Ordering::Relaxed) < pool_size {
+        while exited_processes.load(Ordering::SeqCst) < pool_size {
             if Instant::now() > expire {
+                #[cfg(feature = "tracing")]
+                tracing::warn!("Process pool shutdown timed out");
                 eprintln!("⚠️  Timeout. Exiting.");
                 break;
             }
@@ -609,43 +662,32 @@ impl ProcessPool {
 
 mod colors {
     use console::Color;
-    use rand::{seq::SliceRandom, thread_rng};
+    use rand::{rng, seq::SliceRandom};
 
     pub fn make(n: u8) -> Vec<Color> {
-        // Preferred colors
-        let mut primaries = vec![
+        let palette = vec![
             // Color::Red, // Red is for errors
             Color::Green,
             Color::Yellow,
             Color::Blue,
             Color::Magenta,
             Color::Cyan,
-        ];
-        // Not as good as primaries, but good enough to distinct processes
-        let secondaries = vec![
             Color::Color256(24),
             Color::Color256(172),
             Color::Color256(142),
         ];
 
-        // Let's check first if we can get away with just primary colors
-        if n <= primaries.len() as u8 {
-            shuffle(primaries, n)
-        }
-        // Otherwise, let's check if primary + secondary combined would work
-        else if n <= (primaries.len() + primaries.len()) as u8 {
-            primaries.extend(secondaries);
-            shuffle(primaries, n)
-        } else {
-            // TODO: Duplicate primary + secondary colors vec as many is needed, then shuffle
-            todo!()
-        }
+        shuffle(palette, n)
     }
 
-    fn shuffle<T>(mut items: Vec<T>, n: u8) -> Vec<T> {
-        items.truncate(n as usize);
-        items.shuffle(&mut thread_rng());
-        items
+    fn shuffle<T: Clone>(items: Vec<T>, n: u8) -> Vec<T> {
+        let mut rng = rng();
+        let mut indices: Vec<usize> = (0..n as usize).collect();
+        indices.shuffle(&mut rng);
+        indices
+            .into_iter()
+            .map(|i| items[i % items.len()].clone())
+            .collect()
     }
 }
 

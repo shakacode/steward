@@ -31,6 +31,7 @@ pub fn print(msg: impl Display) {
     eprintln!("{}", self::plain_headline(msg))
 }
 
+/// Formats a message with the `❯` prefix and bold styling, without printing it.
 pub(crate) fn plain_headline(msg: impl Display) -> String {
     format!("❯ {}", console::style(msg).bold())
 }

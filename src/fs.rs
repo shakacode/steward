@@ -6,6 +6,7 @@ use tokio::time;
 use crate::{Dependency, DependencyWaitError, Location};
 
 /// File system entry.
+#[derive(Debug)]
 pub struct FsEntry<Loc> {
     /// A tag used as an identificator of the FS entry in the output.
     pub tag: String,

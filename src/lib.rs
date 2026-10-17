@@ -78,14 +78,22 @@
 //! ```
 //!
 //! ## Limitations
-//! ### Windows
-//! Apparently, Windows build is broken on recent versions of Rust due to
-//! [`winapi`](https://github.com/retep998/winapi-rs) being unmaintained.
-//! We need to migrate to [`windows-rs`](https://github.com/microsoft/windows-rs),
-//! but I don't know anything about Windows, so help is very welcome!
-//!
 //! ### Async runtimes
 //! Tokio only.
+//!
+//! ## Security
+//!
+//! Commands specified via [`Cmd`] are executed through the system shell
+//! (`/bin/sh -c` on Unix, `cmd /c` on Windows). This means shell metacharacters
+//! in the `exe` field will be interpreted by the shell. Do not pass untrusted
+//! input directly as a command string — sanitize or escape it first.
+//!
+//! Child processes inherit the parent process environment. The [`Env`] you provide
+//! via [`Cmd`] adds or overrides entries but does not clear inherited variables.
+//! `Env::empty()` does not isolate child processes from parent secrets.
+//! There is no sandboxing: spawned processes have the same OS-level permissions
+//! as the parent process. Do not run steward with elevated privileges unless
+//! you trust all commands and their transitive dependencies.
 
 /// Base building block of the crate.
 ///

@@ -1,12 +1,11 @@
-use std::{io, ops::Deref, process::Stdio, time::Duration};
+use std::{io, ops::Deref, process::Stdio, sync::LazyLock, time::Duration};
 
-use once_cell::sync::Lazy;
 use tokio::process::Command;
 
 use crate::{Env, Location, Result, RunningProcess};
 
 /// Struct holds a specification of a command. Can be used for running one-off commands, long running processes etc.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Cmd<Loc> {
     /// Command to run.
     pub exe: String,
@@ -53,6 +52,13 @@ pub struct KillTimeout(Duration);
 
 impl KillTimeout {
     /// Constructs a new timeout.
+    ///
+    /// ```
+    /// # use steward::KillTimeout;
+    /// # use std::time::Duration;
+    /// let timeout = KillTimeout::new(Duration::from_secs(30));
+    /// assert_eq!(timeout.duration(), Duration::from_secs(30));
+    /// ```
     pub fn new(duration: Duration) -> Self {
         Self(duration)
     }
@@ -63,7 +69,7 @@ impl KillTimeout {
     }
 }
 
-static DEFAULT_KILL_TIMEOUT: Lazy<Duration> = Lazy::new(|| {
+static DEFAULT_KILL_TIMEOUT: LazyLock<Duration> = LazyLock::new(|| {
     let default = Duration::from_secs(10);
     match std::env::var("PROCESS_TIMEOUT") {
         Err(_) => default,
@@ -102,6 +108,7 @@ impl From<Duration> for KillTimeout {
 }
 
 /// Options for [`Cmd::spawn`](Cmd::spawn).
+#[derive(Debug)]
 pub struct SpawnOptions {
     /// Stdout stream.
     pub stdout: Stdio,
@@ -126,6 +133,7 @@ impl Default for SpawnOptions {
 }
 
 /// Enum returned from [`Cmd::output`](Cmd::output).
+#[derive(Debug)]
 pub struct Output(Vec<u8>);
 
 impl Output {
@@ -155,13 +163,15 @@ where
     pub(crate) const SHELL: &'static str = "cmd";
 
     #[cfg(unix)]
-    pub(crate) fn shelled(cmd: &str) -> Vec<&str> {
-        vec!["-c", cmd]
+    /// Returns shell arguments for invoking a command string via `/bin/sh`.
+    pub(crate) fn shelled(cmd: &str) -> [&str; 2] {
+        ["-c", cmd]
     }
 
     #[cfg(windows)]
-    pub(crate) fn shelled(cmd: &str) -> Vec<&str> {
-        vec!["/c", cmd]
+    /// Returns shell arguments for invoking a command string via `cmd`.
+    pub(crate) fn shelled(cmd: &str) -> [&str; 2] {
+        ["/c", cmd]
     }
 
     /// Runs one-off command with inherited [`Stdio`](std::process::Stdio). Prints headline (witn [`Cmd::msg`](Cmd::msg), if provided) to stderr.
@@ -206,7 +216,6 @@ where
     }
 
     /// A low-level method for spawning a process and getting a handle to it.
-    #[cfg(unix)]
     pub fn spawn(&self, opts: SpawnOptions) -> io::Result<RunningProcess> {
         let cmd = self;
 
@@ -220,43 +229,17 @@ where
         let mut command = Command::new(Cmd::<Loc>::SHELL);
         command
             .args(Cmd::<Loc>::shelled(&cmd.exe))
-            .envs(cmd.env.to_owned())
+            .envs(&cmd.env)
             .current_dir(cmd.pwd.as_path())
             .stdout(stdout)
             .stderr(stderr);
 
         if group {
+            #[cfg(unix)]
             command.process_group(0);
+            #[cfg(windows)]
+            command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
         }
-
-        let process = command.spawn()?;
-
-        Ok(RunningProcess {
-            process,
-            timeout,
-            group,
-        })
-    }
-
-    /// A low-level method for spawning a process and getting a handle to it.
-    #[cfg(windows)]
-    pub fn spawn(&self, opts: SpawnOptions) -> io::Result<RunningProcess> {
-        let cmd = self;
-
-        let SpawnOptions {
-            stdout,
-            stderr,
-            timeout,
-            group,
-        } = opts;
-
-        let mut command = Command::new(Cmd::<Loc>::SHELL);
-        command
-            .args(Cmd::<Loc>::shelled(&cmd.exe))
-            .envs(cmd.env.to_owned())
-            .current_dir(cmd.pwd.as_path())
-            .stdout(stdout)
-            .stderr(stderr);
 
         let process = command.spawn()?;
 
@@ -618,7 +601,7 @@ mod tests {
           format!("ls {}", "."),
           env: env,
           pwd: loc,
-          msg: format!("!"),
+          msg: "!".to_string(),
         }
     }
 
@@ -628,7 +611,7 @@ mod tests {
           exe: format!("ls {}", "."),
           env: env,
           pwd: loc,
-          msg: format!("!"),
+          msg: "!".to_string(),
         }
     }
 
@@ -638,7 +621,7 @@ mod tests {
           "ls",
           env: env,
           pwd: loc,
-          msg: format!("!"),
+          msg: "!".to_string(),
         }
     }
 
@@ -648,7 +631,7 @@ mod tests {
           exe: "ls",
           env: env,
           pwd: loc,
-          msg: format!("!"),
+          msg: "!".to_string(),
         }
     }
 
@@ -661,7 +644,7 @@ mod tests {
           "ls",
           env: env,
           pwd: loc,
-          msg: Some(format!("!")),
+          msg: Some("!".to_string()),
         }
     }
 
@@ -671,7 +654,7 @@ mod tests {
           exe: "ls",
           env: env,
           pwd: loc,
-          msg: Some(format!("!")),
+          msg: Some("!".to_string()),
         }
     }
 
@@ -681,7 +664,7 @@ mod tests {
           format!("ls {}", "."),
           env: env,
           pwd: loc,
-          msg: Some(format!("!")),
+          msg: Some("!".to_string()),
         }
     }
 
@@ -691,7 +674,7 @@ mod tests {
           exe: format!("ls {}", "."),
           env: env,
           pwd: loc,
-          msg: Some(format!("!")),
+          msg: Some("!".to_string()),
         }
     }
 
@@ -779,5 +762,72 @@ mod tests {
     #[allow(dead_code)]
     fn cmd_macro_labeled_exe_no_trailing_comma<Loc: Location>(env: Env, loc: Loc) -> Cmd<Loc> {
         cmd! { exe: "ls", env: env, pwd: loc }
+    }
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    #[test]
+    fn kill_timeout_default_respects_env() {
+        let timeout = KillTimeout::default();
+        let expected = match std::env::var("PROCESS_TIMEOUT") {
+            Ok(val) => val
+                .parse::<u64>()
+                .map(Duration::from_secs)
+                .unwrap_or(Duration::from_secs(10)),
+            Err(_) => Duration::from_secs(10),
+        };
+        assert_eq!(timeout.duration(), expected);
+    }
+
+    #[test]
+    fn kill_timeout_new() {
+        let timeout = KillTimeout::new(Duration::from_secs(30));
+        assert_eq!(timeout.duration(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn kill_timeout_from_duration() {
+        let timeout: KillTimeout = Duration::from_secs(5).into();
+        assert_eq!(timeout.duration(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn kill_timeout_deref_to_duration() {
+        let timeout = KillTimeout::new(Duration::from_secs(15));
+        let dur: &Duration = &timeout;
+        assert_eq!(*dur, Duration::from_secs(15));
+    }
+
+    #[test]
+    fn kill_timeout_clone() {
+        let timeout = KillTimeout::new(Duration::from_secs(7));
+        let cloned = timeout.clone();
+        assert_eq!(cloned.duration(), Duration::from_secs(7));
+    }
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    #[test]
+    fn output_bytes() {
+        let output = Output(b"hello".to_vec());
+        assert_eq!(output.bytes(), b"hello");
+    }
+
+    #[test]
+    fn output_as_string_valid_utf8() {
+        let output = Output(b"hello world".to_vec());
+        assert_eq!(output.as_string().unwrap(), "hello world");
+    }
+
+    #[test]
+    fn output_as_string_invalid_utf8() {
+        let output = Output(vec![0xff, 0xfe]);
+        assert!(output.as_string().is_err());
     }
 }

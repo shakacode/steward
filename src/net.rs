@@ -6,25 +6,27 @@ use std::{
 };
 
 use async_trait::async_trait;
-use hyper::{client::HttpConnector, http::uri::InvalidUri, Body, Client, Request, Response, Uri};
+use bytes::Bytes;
+use http::{uri::InvalidUri, Request, Response, Uri};
+use http_body_util::Empty;
+use hyper_util::{
+    client::legacy::{connect::Connect, Client},
+    rt::TokioExecutor,
+};
 use tokio::{io::AsyncWriteExt, net::TcpStream, time};
 
 use crate::{Dependency, DependencyWaitError};
 
-pub use hyper::Method as HttpMethod;
+pub use http::Method as HttpMethod;
 
-const ITER_GAP: Duration = Duration::from_millis(250); // ms
+const ITER_GAP: Duration = Duration::from_millis(250);
 
-/// Error returned from a network [`Dependency::wait`](Dependency::wait) method.
 #[derive(thiserror::Error, Debug)]
 enum NetServiceWaitError {
-    /// Rejected network request.
     #[error("Rejection: {}", .error)]
     Rejection {
-        /// Error from the dependency.
         error: Box<dyn StdError + Send + Sync>,
     },
-    /// Request timeout.
     #[error("Timeout")]
     Timeout,
 }
@@ -32,6 +34,7 @@ enum NetServiceWaitError {
 impl DependencyWaitError for NetServiceWaitError {}
 
 /// TCP service.
+#[derive(Debug)]
 pub struct TcpService {
     /// A tag used as an identificator of the dependency in the output.
     pub tag: String,
@@ -109,6 +112,7 @@ impl Dependency for TcpService {
 }
 
 /// HTTP service.
+#[derive(Debug)]
 pub struct HttpService {
     /// A tag used as an identificator of the dependency in the output.
     pub tag: String,
@@ -120,25 +124,39 @@ pub struct HttpService {
     pub timeout: Duration,
 }
 
+type EmptyBody = Empty<Bytes>;
+
+/// Builds an HTTP client with the provided connector.
+fn build_client<C>(connector: C) -> Client<C, EmptyBody>
+where
+    C: Connect + Clone + Send + Sync + 'static,
+{
+    Client::builder(TokioExecutor::new()).build(connector)
+}
+
 impl HttpService {
-    fn http_connector() -> HttpConnector {
-        HttpConnector::new()
+    /// Returns a plain HTTP connector.
+    fn http_connector() -> hyper_util::client::legacy::connect::HttpConnector {
+        hyper_util::client::legacy::connect::HttpConnector::new()
     }
 
     #[cfg(feature = "tls")]
-    fn https_connector() -> tls::HttpsConnector<HttpConnector> {
+    /// Returns an HTTPS connector with TLS support.
+    fn https_connector() -> tls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>
+    {
         tls::HttpsConnector::new()
     }
 
     #[cfg(not(feature = "tls"))]
-    fn https_connector() -> HttpConnector {
-        unreachable!("Cannot use https_connector method without tls feature");
+    /// Returns a plain HTTP connector (TLS feature disabled).
+    fn https_connector() -> hyper_util::client::legacy::connect::HttpConnector {
+        unreachable!("Cannot use https_connector method without tls feature")
     }
 }
 
 #[derive(Debug)]
 struct HttpError {
-    status: hyper::StatusCode,
+    status: http::StatusCode,
 }
 
 impl std::error::Error for HttpError {}
@@ -146,14 +164,6 @@ impl std::error::Error for HttpError {}
 impl fmt::Display for HttpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.status)
-    }
-}
-
-impl From<hyper::Response<Body>> for HttpError {
-    fn from(res: hyper::Response<Body>) -> Self {
-        Self {
-            status: res.status(),
-        }
     }
 }
 
@@ -178,21 +188,75 @@ impl HttpService {
         })
     }
 
-    pub(crate) fn build_req(&self) -> Request<Body> {
+    /// Constructs an HTTP request for the dependency check.
+    pub(crate) fn build_req(&self) -> Result<Request<EmptyBody>, http::Error> {
         Request::builder()
             .method(&self.method)
             .uri(&self.addr)
-            .body(Body::default())
-            .expect("Failed to build HTTP request")
+            .body(EmptyBody::new())
     }
 
-    fn handle_res(res: Response<Body>) -> Result<(), Box<dyn DependencyWaitError>> {
+    /// Checks the HTTP response and returns an error for non-success status codes.
+    fn handle_res(
+        res: &Response<hyper::body::Incoming>,
+    ) -> Result<(), Box<dyn DependencyWaitError>> {
         if res.status().is_success() {
             Ok(())
         } else {
             Err(Box::new(NetServiceWaitError::Rejection {
-                error: Box::new(Into::<HttpError>::into(res)),
+                error: Box::new(HttpError {
+                    status: res.status(),
+                }),
             }))
+        }
+    }
+
+    /// Returns true if the service address uses the `https` scheme.
+    fn is_https(&self) -> bool {
+        matches!(self.addr.scheme_str(), Some("https"))
+    }
+
+    /// Performs a single dependency check using the provided connector.
+    async fn check_with<C>(&self, connector: C) -> Result<(), ()>
+    where
+        C: Connect + Clone + Send + Sync + 'static,
+    {
+        let client = build_client(connector);
+        let req = self.build_req().map_err(|_| ())?;
+        let res = client.request(req).await.map_err(|_| ())?;
+        Self::handle_res(&res).map_err(|_| ())
+    }
+
+    /// Polls the HTTP service until it responds successfully or the timeout expires.
+    async fn wait_with<C>(&self, connector: C) -> Result<(), Box<dyn DependencyWaitError>>
+    where
+        C: Connect + Clone + Send + Sync + 'static,
+    {
+        let client = build_client(connector);
+        let start = Instant::now();
+
+        loop {
+            let remaining = self.timeout.saturating_sub(start.elapsed());
+            if remaining.is_zero() {
+                return Err(Box::new(NetServiceWaitError::Timeout));
+            }
+
+            let req = match self.build_req() {
+                Ok(req) => req,
+                Err(err) => {
+                    return Err(Box::new(NetServiceWaitError::Rejection {
+                        error: Box::new(err),
+                    }));
+                }
+            };
+
+            match time::timeout(remaining, client.request(req)).await {
+                Ok(Ok(res)) => return Self::handle_res(&res),
+                Ok(Err(_)) => (),
+                Err(_) => return Err(Box::new(NetServiceWaitError::Timeout)),
+            }
+
+            time::sleep(ITER_GAP).await;
         }
     }
 }
@@ -204,70 +268,18 @@ impl Dependency for HttpService {
     }
 
     async fn check(&self) -> Result<(), ()> {
-        match self.addr.scheme_str() {
-            Some("https") => {
-                let connector = Self::https_connector();
-                let client = Client::builder().build(connector);
-                let req = self.build_req();
-                let res = client.request(req).await.map_err(|_| ())?;
-                Self::handle_res(res).map_err(|_| ())
-            }
-            Some(_) | None => {
-                let connector = Self::http_connector();
-                let client = Client::builder().build(connector);
-                let req = self.build_req();
-                let res = client.request(req).await.map_err(|_| ())?;
-                Self::handle_res(res).map_err(|_| ())
-            }
+        if self.is_https() {
+            self.check_with(Self::https_connector()).await
+        } else {
+            self.check_with(Self::http_connector()).await
         }
     }
 
     async fn wait(&self) -> Result<(), Box<dyn DependencyWaitError>> {
-        let start = Instant::now();
-
-        match self.addr.scheme_str() {
-            Some("https") => {
-                let connector = Self::https_connector();
-                let client = Client::builder().build(connector);
-
-                loop {
-                    let remaining = self.timeout.saturating_sub(start.elapsed());
-                    if remaining.is_zero() {
-                        return Err(Box::new(NetServiceWaitError::Timeout));
-                    }
-
-                    let req = self.build_req();
-
-                    match time::timeout(remaining, client.request(req)).await {
-                        Ok(Ok(res)) => return Self::handle_res(res),
-                        Ok(Err(_)) => (),
-                        Err(_) => return Err(Box::new(NetServiceWaitError::Timeout)),
-                    }
-
-                    time::sleep(ITER_GAP).await;
-                }
-            }
-            Some(_) | None => {
-                let connector = Self::http_connector();
-                let client = Client::builder().build(connector);
-
-                loop {
-                    let remaining = self.timeout.saturating_sub(start.elapsed());
-                    if remaining.is_zero() {
-                        return Err(Box::new(NetServiceWaitError::Timeout));
-                    }
-
-                    let req = self.build_req();
-
-                    match time::timeout(remaining, client.request(req)).await {
-                        Ok(Ok(res)) => return Self::handle_res(res),
-                        Ok(Err(_)) => (),
-                        Err(_) => return Err(Box::new(NetServiceWaitError::Timeout)),
-                    }
-
-                    time::sleep(ITER_GAP).await;
-                }
-            }
+        if self.is_https() {
+            self.wait_with(Self::https_connector()).await
+        } else {
+            self.wait_with(Self::http_connector()).await
         }
     }
 }
